@@ -6,6 +6,7 @@ const HISTORY_CSV_URL = "";
 const FMP_API_KEY = "9dS0j2jb35MZHfrSviWkA6WqOYRWOEWq";
 const FMP_QUOTE_BASE = "https://financialmodelingprep.com/stable/batch-quote";
 const LIVE_PRICE_REFRESH_MS = 60_000;
+const LIVE_PRICE_MAX_BACKOFF_MS = 5 * 60_000;
 const PROFILE_REQUEST_DELAY_MS = 1100;
 
 const SECTOR_MAP = {
@@ -419,7 +420,7 @@ const treemapState = {
 
 async function fetchLivePricesFmp(rows) {
   if (!FMP_API_KEY) {
-    return;
+    return { ok: false, rateLimited: false };
   }
   const symbols = rows
     .map((row) => row.ticker)
@@ -434,19 +435,22 @@ async function fetchLivePricesFmp(rows) {
       return true;
     });
   if (!symbols.length) {
-    return;
+    return { ok: false, rateLimited: false };
   }
   const url = `${FMP_QUOTE_BASE}?symbols=${encodeURIComponent(
     symbols.join(",")
   )}&apikey=${encodeURIComponent(FMP_API_KEY)}`;
   try {
     const response = await fetch(url);
+    if (response.status === 429) {
+      return { ok: false, rateLimited: true };
+    }
     if (!response.ok) {
-      return;
+      return { ok: false, rateLimited: false };
     }
     const data = await response.json();
     if (!Array.isArray(data)) {
-      return;
+      return { ok: false, rateLimited: false };
     }
     data.forEach((item) => {
       if (item && item.symbol && item.price) {
@@ -458,21 +462,27 @@ async function fetchLivePricesFmp(rows) {
         applyLivePrice(item.symbol, Number(item.price));
       }
     });
+    return { ok: true, rateLimited: false };
   } catch (err) {
-    return;
+    return { ok: false, rateLimited: false };
   }
 }
 
 function startLivePrices(rows) {
   liveRows = rows;
-  fetchLivePricesFmp(rows).catch((err) => {
-    console.warn(err.message);
-  });
-  setInterval(() => {
-    fetchLivePricesFmp(rows).catch((err) => {
-      console.warn(err.message);
-    });
-  }, LIVE_PRICE_REFRESH_MS);
+  let backoff = LIVE_PRICE_REFRESH_MS;
+
+  const tick = async () => {
+    const result = await fetchLivePricesFmp(rows);
+    if (result.rateLimited) {
+      backoff = Math.min(backoff * 2, LIVE_PRICE_MAX_BACKOFF_MS);
+    } else {
+      backoff = LIVE_PRICE_REFRESH_MS;
+    }
+    setTimeout(tick, backoff);
+  };
+
+  tick();
 }
 
 function renderHistory(history) {
