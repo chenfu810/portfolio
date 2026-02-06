@@ -130,7 +130,14 @@ async function fetchProfileForTicker(ticker) {
 
 async function buildProfileMap(rows) {
   const map = {};
-  const tickers = rows.map((row) => row.ticker);
+  const tickers = rows
+    .map((row) => row.ticker)
+    .filter((ticker) => {
+      if (!ticker) {
+        return false;
+      }
+      return ticker.toUpperCase() !== "CASH";
+    });
   for (const ticker of tickers) {
     map[ticker] = await fetchProfileForTicker(ticker);
     await new Promise((resolve) => setTimeout(resolve, PROFILE_REQUEST_DELAY_MS));
