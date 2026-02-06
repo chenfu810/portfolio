@@ -4,8 +4,9 @@ const SHEET_CSV_URL =
 const HISTORY_CSV_URL = "";
 
 const FMP_API_KEY = "9dS0j2jb35MZHfrSviWkA6WqOYRWOEWq";
-const FMP_QUOTE_BASE = "https://financialmodelingprep.com/stable/quote";
-const LIVE_PRICE_REFRESH_MS = 30_000;
+const FMP_QUOTE_BASE = "https://financialmodelingprep.com/stable/batch-quote";
+const LIVE_PRICE_REFRESH_MS = 60_000;
+const PROFILE_REQUEST_DELAY_MS = 1100;
 
 const SECTOR_MAP = {
   AAPL: "Consumer Tech",
@@ -129,10 +130,10 @@ async function fetchProfileForTicker(ticker) {
 async function buildProfileMap(rows) {
   const map = {};
   const tickers = rows.map((row) => row.ticker);
-  const profiles = await Promise.all(tickers.map((ticker) => fetchProfileForTicker(ticker)));
-  tickers.forEach((ticker, idx) => {
-    map[ticker] = profiles[idx];
-  });
+  for (const ticker of tickers) {
+    map[ticker] = await fetchProfileForTicker(ticker);
+    await new Promise((resolve) => setTimeout(resolve, PROFILE_REQUEST_DELAY_MS));
+  }
   return map;
 }
 
@@ -435,37 +436,31 @@ async function fetchLivePricesFmp(rows) {
   if (!symbols.length) {
     return;
   }
-  const results = await Promise.all(
-    symbols.map(async (symbol) => {
-      const url = `${FMP_QUOTE_BASE}?symbol=${encodeURIComponent(
-        symbol
-      )}&apikey=${encodeURIComponent(FMP_API_KEY)}`;
-      try {
-        const response = await fetch(url);
-        if (!response.ok) {
-          return null;
-        }
-        const data = await response.json();
-        if (!Array.isArray(data) || !data[0]) {
-          return null;
-        }
-        return data[0];
-      } catch (err) {
-        return null;
-      }
-    })
-  );
-
-  results.forEach((item) => {
-    if (item && item.symbol && item.price) {
-      const pct = item.changesPercentage ? Number(item.changesPercentage) / 100 : 0;
-      const row = rows.find((r) => r.ticker === item.symbol);
-      if (row) {
-        row.dailyPct = Number.isFinite(pct) ? pct : row.dailyPct;
-      }
-      applyLivePrice(item.symbol, Number(item.price));
+  const url = `${FMP_QUOTE_BASE}?symbols=${encodeURIComponent(
+    symbols.join(",")
+  )}&apikey=${encodeURIComponent(FMP_API_KEY)}`;
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      return;
     }
-  });
+    const data = await response.json();
+    if (!Array.isArray(data)) {
+      return;
+    }
+    data.forEach((item) => {
+      if (item && item.symbol && item.price) {
+        const pct = item.changesPercentage ? Number(item.changesPercentage) / 100 : 0;
+        const row = rows.find((r) => r.ticker === item.symbol);
+        if (row) {
+          row.dailyPct = Number.isFinite(pct) ? pct : row.dailyPct;
+        }
+        applyLivePrice(item.symbol, Number(item.price));
+      }
+    });
+  } catch (err) {
+    return;
+  }
 }
 
 function startLivePrices(rows) {
