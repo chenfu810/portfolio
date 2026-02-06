@@ -420,7 +420,18 @@ async function fetchLivePricesFmp(rows) {
   if (!FMP_API_KEY) {
     return;
   }
-  const symbols = rows.map((row) => row.ticker).filter(Boolean);
+  const symbols = rows
+    .map((row) => row.ticker)
+    .filter((symbol) => {
+      if (!symbol) {
+        return false;
+      }
+      const upper = symbol.toUpperCase();
+      if (upper === "CASH") {
+        return false;
+      }
+      return true;
+    });
   if (!symbols.length) {
     return;
   }
@@ -429,15 +440,19 @@ async function fetchLivePricesFmp(rows) {
       const url = `${FMP_QUOTE_BASE}?symbol=${encodeURIComponent(
         symbol
       )}&apikey=${encodeURIComponent(FMP_API_KEY)}`;
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch live price for ${symbol}.`);
-      }
-      const data = await response.json();
-      if (!Array.isArray(data) || !data[0]) {
+      try {
+        const response = await fetch(url);
+        if (!response.ok) {
+          return null;
+        }
+        const data = await response.json();
+        if (!Array.isArray(data) || !data[0]) {
+          return null;
+        }
+        return data[0];
+      } catch (err) {
         return null;
       }
-      return data[0];
     })
   );
 
