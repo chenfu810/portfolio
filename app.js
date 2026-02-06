@@ -63,7 +63,7 @@ function normalizeRow(row) {
   const shares = Number(normalized["shares"] || 0);
   const price = Number(normalized["price (current)"] || normalized["price"] || 0);
   const dailyPctRaw = normalized["daily change %"] || normalized["daily %"] || "0";
-  const dailyPct = Number(dailyPctRaw.toString().replace("%", "")) / 100;
+  const dailyPct = Number(dailyPctRaw.toString().replace("%", ""));
   const value =
     Number(normalized["value"] || 0) || (shares && price ? shares * price : 0);
   const monthPctRaw = normalized["monthly change %"] || normalized["month change %"];
