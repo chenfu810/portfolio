@@ -3,7 +3,7 @@ const SHEET_CSV_URL =
 
 const HISTORY_CSV_URL = "";
 
-const FMP_API_KEY = "9dS0j2jb35MZHfrSviWkA6WqOYRWOEWq";
+const FMP_API_KEY = "";
 const FMP_QUOTE_BASE = "https://financialmodelingprep.com/stable/batch-quote";
 const LIVE_PRICE_REFRESH_MS = 60_000;
 const LIVE_PRICE_MAX_BACKOFF_MS = 5 * 60_000;
@@ -61,6 +61,11 @@ function normalizeRow(row) {
 
   const ticker = normalized["ticker"] || normalized["ticket"] || "";
   const shares = Number(normalized["shares"] || 0);
+  const price = Number(normalized["price (current)"] || normalized["price"] || 0);
+  const dailyPctRaw = normalized["daily change %"] || normalized["daily %"] || "0";
+  const dailyPct = Number(dailyPctRaw.toString().replace("%", "")) / 100;
+  const value =
+    Number(normalized["value"] || 0) || (shares && price ? shares * price : 0);
   const monthPctRaw = normalized["monthly change %"] || normalized["month change %"];
   const yearPctRaw = normalized["yearly change %"] || normalized["year change %"];
 
@@ -72,9 +77,9 @@ function normalizeRow(row) {
   return {
     ticker,
     shares,
-    price: 0,
-    dailyPct: 0,
-    value: 0,
+    price,
+    dailyPct,
+    value,
     monthPct,
     yearPct,
   };
@@ -625,7 +630,10 @@ async function loadData() {
   renderTable(rows);
   buildCharts(rows);
   renderTreemap(rows, treemapState.level, treemapState.filterKey);
-  startLivePrices(rows);
+  const hasSheetPrices = rows.some((row) => row.price > 0);
+  if (!hasSheetPrices) {
+    startLivePrices(rows);
+  }
 
   document.getElementById("sourceLabel").textContent = sourceLabel;
 
