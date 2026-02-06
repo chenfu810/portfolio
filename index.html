@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Portfolio Pulse</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Space+Grotesk:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  </head>
+  <body>
+    <div class="bg-orb orb-1"></div>
+    <div class="bg-orb orb-2"></div>
+    <div class="bg-grid"></div>
+
+    <main class="app">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Portfolio Pulse</p>
+          <h1>Track your portfolio at a glance.</h1>
+        </div>
+        <button id="refreshBtn" class="ghost-btn">Refresh</button>
+      </header>
+
+      <section class="hero">
+        <div class="hero-card">
+          <p class="label">Total Value</p>
+          <h2 id="totalValue">$0</h2>
+          <p id="dailyChange" class="delta">+0.00% today</p>
+          <p class="note">Daily change uses your sheet’s “daily change %”.</p>
+        </div>
+        <div class="hero-card highlight">
+          <p class="label">Top Mover</p>
+          <h3 id="topMover">—</h3>
+          <p id="topMoverDelta" class="delta">—</p>
+          <div class="mini-grid">
+            <div>
+              <p class="label">Daily P/L</p>
+              <p id="dailyPL">$0</p>
+            </div>
+            <div>
+              <p class="label">Monthly P/L</p>
+              <p id="monthlyPL">Add column</p>
+            </div>
+            <div>
+              <p class="label">Yearly P/L</p>
+              <p id="yearlyPL">Add column</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="grid">
+        <div class="panel">
+          <div class="panel-header">
+            <h3>Allocation by Ticker</h3>
+            <p class="subtle">Includes daily % change in tooltips.</p>
+          </div>
+          <canvas id="tickerChart"></canvas>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <h3>Allocation by Sector</h3>
+            <p class="subtle">Auto-filled when API key is set.</p>
+          </div>
+          <canvas id="sectorChart"></canvas>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h3>Portfolio Value Over Time</h3>
+          <p class="subtle">Uses a separate history tab if provided.</p>
+        </div>
+        <div id="historyEmpty" class="empty">
+          Add a history tab with columns: <span class="mono">date</span>,
+          <span class="mono">total value</span>.
+        </div>
+        <canvas id="historyChart"></canvas>
+      </section>
+
+      <section class="panel table-panel">
+        <div class="panel-header">
+          <h3>Holdings</h3>
+          <p class="subtle">Sorted by value (highest first).</p>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Ticker</th>
+                <th>Shares</th>
+                <th>Price</th>
+                <th>Daily %</th>
+                <th>Value</th>
+              </tr>
+            </thead>
+            <tbody id="holdingsTable"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel footer">
+        <p>
+          Data source:
+          <span id="sourceLabel" class="mono">Sample data</span>
+        </p>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
