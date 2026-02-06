@@ -4,8 +4,8 @@ const SHEET_CSV_URL =
 const HISTORY_CSV_URL = "";
 
 const FMP_API_KEY = "9dS0j2jb35MZHfrSviWkA6WqOYRWOEWq";
-const FMP_QUOTE_BASE = "https://financialmodelingprep.com/stable/batch-quote";
-const LIVE_PRICE_REFRESH_MS = 20_000;
+const FMP_QUOTE_BASE = "https://financialmodelingprep.com/stable/quote";
+const LIVE_PRICE_REFRESH_MS = 30_000;
 
 const SECTOR_MAP = {
   AAPL: "Consumer Tech",
@@ -273,24 +273,29 @@ async function fetchLivePricesFmp(rows) {
   if (!FMP_API_KEY) {
     return;
   }
-  const symbols = rows.map((row) => row.ticker).join(",");
-  if (!symbols) {
+  const symbols = rows.map((row) => row.ticker).filter(Boolean);
+  if (!symbols.length) {
     return;
   }
-  const url = `${FMP_QUOTE_BASE}?symbols=${encodeURIComponent(
-    symbols
-  )}&apikey=${encodeURIComponent(FMP_API_KEY)}`;
+  const results = await Promise.all(
+    symbols.map(async (symbol) => {
+      const url = `${FMP_QUOTE_BASE}?symbol=${encodeURIComponent(
+        symbol
+      )}&apikey=${encodeURIComponent(FMP_API_KEY)}`;
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch live price for ${symbol}.`);
+      }
+      const data = await response.json();
+      if (!Array.isArray(data) || !data[0]) {
+        return null;
+      }
+      return data[0];
+    })
+  );
 
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error("Failed to fetch live prices.");
-  }
-  const data = await response.json();
-  if (!Array.isArray(data)) {
-    return;
-  }
-  data.forEach((item) => {
-    if (item.symbol && item.price) {
+  results.forEach((item) => {
+    if (item && item.symbol && item.price) {
       applyLivePrice(item.symbol, Number(item.price));
     }
   });
