@@ -42,9 +42,11 @@ let liveUpdateScheduled = false;
 
 function parseCSV(text) {
   const lines = text.trim().split(/\r?\n/);
-  const headers = lines.shift().split(",").map((h) => h.trim());
+  const sample = lines[0] || "";
+  const delimiter = sample.includes(",") ? "," : sample.includes("\t") ? "\t" : ",";
+  const headers = lines.shift().split(delimiter).map((h) => h.trim());
   return lines.map((line) => {
-    const values = line.split(",").map((v) => v.trim());
+    const values = line.split(delimiter).map((v) => v.trim());
     return headers.reduce((acc, header, idx) => {
       acc[header] = values[idx] ?? "";
       return acc;
@@ -63,7 +65,15 @@ function normalizeRow(row) {
   const shares = Number(normalized["shares"] || 0);
   const price = Number(normalized["price (current)"] || normalized["price"] || 0);
   const dailyPctRaw = normalized["daily change %"] || normalized["daily %"] || "0";
-  const dailyPct = Number(dailyPctRaw.toString().replace("%", ""));
+  const dailyPctString = dailyPctRaw.toString().trim();
+  const hasPercent = dailyPctString.includes("%");
+  const dailyPctValue = Number(dailyPctString.replace("%", ""));
+  const dailyPct =
+    Number.isFinite(dailyPctValue) && dailyPctValue !== 0
+      ? hasPercent || Math.abs(dailyPctValue) > 1
+        ? dailyPctValue / 100
+        : dailyPctValue
+      : 0;
   const value =
     Number(normalized["value"] || 0) || (shares && price ? shares * price : 0);
   const monthPctRaw = normalized["monthly change %"] || normalized["month change %"];
