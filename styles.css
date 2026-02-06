@@ -140,6 +140,59 @@ h3 {
   margin-bottom: 18px;
 }
 
+.breadcrumb {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.treemap {
+  position: relative;
+  width: 100%;
+  height: 520px;
+  background: var(--panel-strong);
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.treemap-block {
+  position: absolute;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 10px;
+  font-size: 12px;
+  line-height: 1.3;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.treemap-block:hover {
+  transform: scale(1.01);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  z-index: 2;
+}
+
+.treemap-block .title {
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.treemap-block .meta {
+  margin-top: 6px;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 11px;
+}
+
+.treemap-block.green {
+  background: linear-gradient(135deg, rgba(98, 217, 156, 0.45), rgba(98, 217, 156, 0.12));
+}
+
+.treemap-block.red {
+  background: linear-gradient(135deg, rgba(244, 91, 105, 0.45), rgba(244, 91, 105, 0.12));
+}
+
 .subtle {
   color: var(--muted);
   font-size: 12px;

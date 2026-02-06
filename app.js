@@ -15,12 +15,12 @@ const SECTOR_MAP = {
   TSLA: "Automotive",
 };
 
-const SAMPLE_CSV = `ticket,shares,price (current),daily change %,value
-NVDA,100,185,3%,18500
-AAPL,50,190,1.2%,9500
-MSFT,20,410,-0.8%,8200
-AMZN,12,170,0.6%,2040
-TSLA,8,245,-2.1%,1960`;
+const SAMPLE_CSV = `ticket,shares
+NVDA,100
+AAPL,50
+MSFT,20
+AMZN,12
+TSLA,8`;
 
 const fmtCurrency = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -34,7 +34,6 @@ const fmtPercent = new Intl.NumberFormat("en-US", {
 });
 
 let tickerChart;
-let sectorChart;
 let historyChart;
 let liveRows = [];
 let liveUpdateScheduled = false;
@@ -60,12 +59,6 @@ function normalizeRow(row) {
 
   const ticker = normalized["ticker"] || normalized["ticket"] || "";
   const shares = Number(normalized["shares"] || 0);
-  const price = Number(normalized["price (current)"] || normalized["price"] || 0);
-  const dailyPctRaw = normalized["daily change %"] || normalized["daily %"] || "0";
-  const dailyPct = Number(dailyPctRaw.toString().replace("%", "")) / 100;
-  const value =
-    Number(normalized["value"] || 0) || (shares && price ? shares * price : 0);
-
   const monthPctRaw = normalized["monthly change %"] || normalized["month change %"];
   const yearPctRaw = normalized["yearly change %"] || normalized["year change %"];
 
@@ -77,9 +70,9 @@ function normalizeRow(row) {
   return {
     ticker,
     shares,
-    price,
-    dailyPct,
-    value,
+    price: 0,
+    dailyPct: 0,
+    value: 0,
     monthPct,
     yearPct,
   };
@@ -108,34 +101,37 @@ function formatHistoryLabel(label) {
   return label;
 }
 
-async function fetchSectorForTicker(ticker) {
+async function fetchProfileForTicker(ticker) {
   if (!FMP_API_KEY) {
-    return SECTOR_MAP[ticker] || "Unknown";
+    return { sector: SECTOR_MAP[ticker] || "Unknown", industry: "Unknown" };
   }
 
-  const cacheKey = `sector_${ticker}`;
+  const cacheKey = `profile_${ticker}`;
   const cached = localStorage.getItem(cacheKey);
   if (cached) {
-    return cached;
+    return JSON.parse(cached);
   }
 
   const url = `https://financialmodelingprep.com/api/v3/profile/${ticker}?apikey=${FMP_API_KEY}`;
   const response = await fetch(url);
   if (!response.ok) {
-    return SECTOR_MAP[ticker] || "Unknown";
+    return { sector: SECTOR_MAP[ticker] || "Unknown", industry: "Unknown" };
   }
   const data = await response.json();
-  const sector = data?.[0]?.sector || SECTOR_MAP[ticker] || "Unknown";
-  localStorage.setItem(cacheKey, sector);
-  return sector;
+  const profile = {
+    sector: data?.[0]?.sector || SECTOR_MAP[ticker] || "Unknown",
+    industry: data?.[0]?.industry || "Unknown",
+  };
+  localStorage.setItem(cacheKey, JSON.stringify(profile));
+  return profile;
 }
 
-async function buildSectorMap(rows) {
+async function buildProfileMap(rows) {
   const map = {};
   const tickers = rows.map((row) => row.ticker);
-  const sectors = await Promise.all(tickers.map((ticker) => fetchSectorForTicker(ticker)));
+  const profiles = await Promise.all(tickers.map((ticker) => fetchProfileForTicker(ticker)));
   tickers.forEach((ticker, idx) => {
-    map[ticker] = sectors[idx];
+    map[ticker] = profiles[idx];
   });
   return map;
 }
@@ -190,42 +186,6 @@ function buildCharts(rows) {
     },
   });
 
-  const sectorTotals = rows.reduce((acc, row) => {
-    const sector = row.sector || SECTOR_MAP[row.ticker] || "Unknown";
-    acc[sector] = (acc[sector] || 0) + row.value;
-    return acc;
-  }, {});
-
-  if (sectorChart) {
-    sectorChart.destroy();
-  }
-
-  sectorChart = new Chart(document.getElementById("sectorChart"), {
-    type: "polarArea",
-    data: {
-      labels: Object.keys(sectorTotals),
-      datasets: [
-        {
-          data: Object.values(sectorTotals),
-          backgroundColor: Object.keys(sectorTotals).map(
-            (_, idx) => palette[(idx + 2) % palette.length]
-          ),
-          borderWidth: 0,
-        },
-      ],
-    },
-    options: {
-      plugins: {
-        legend: { labels: { color: "#e0e6f3" } },
-      },
-      scales: {
-        r: {
-          ticks: { color: "#e0e6f3" },
-          grid: { color: "rgba(255,255,255,0.08)" },
-        },
-      },
-    },
-  });
 }
 
 function renderTable(rows) {
@@ -233,16 +193,197 @@ function renderTable(rows) {
   tbody.innerHTML = "";
   rows.forEach((row) => {
     const tr = document.createElement("tr");
+    const priceDisplay = row.price ? fmtCurrency.format(row.price) : "—";
+    const valueDisplay = row.value ? fmtCurrency.format(row.value) : "—";
     tr.innerHTML = `
       <td>${row.ticker}</td>
       <td>${row.shares.toLocaleString()}</td>
-      <td>${fmtCurrency.format(row.price)}</td>
+      <td>${priceDisplay}</td>
       <td class="${row.dailyPct >= 0 ? "pos" : "neg"}">
         ${fmtPercent.format(row.dailyPct)}
       </td>
-      <td>${fmtCurrency.format(row.value)}</td>
+      <td>${valueDisplay}</td>
     `;
     tbody.appendChild(tr);
+  });
+}
+
+function squarify(items, x, y, width, height) {
+  const total = items.reduce((sum, item) => sum + item.value, 0);
+  if (!total) {
+    return [];
+  }
+  const result = [];
+  let remaining = items.slice().sort((a, b) => b.value - a.value);
+  let row = [];
+  let remainingWidth = width;
+  let remainingHeight = height;
+  let offsetX = x;
+  let offsetY = y;
+
+  function layoutRow(rowItems, rowSum, horizontal) {
+    const rowSize = horizontal ? remainingHeight : remainingWidth;
+    const rowLength = (rowSum / total) * ((width * height) / rowSize);
+    let offset = 0;
+
+    rowItems.forEach((item) => {
+      const itemSize = (item.value / rowSum) * rowSize;
+      const rect = horizontal
+        ? { x: offsetX + offset, y: offsetY, width: itemSize, height: rowLength }
+        : { x: offsetX, y: offsetY + offset, width: rowLength, height: itemSize };
+      result.push({ ...item, rect });
+      offset += itemSize;
+    });
+
+    if (horizontal) {
+      offsetY += rowLength;
+      remainingHeight -= rowLength;
+    } else {
+      offsetX += rowLength;
+      remainingWidth -= rowLength;
+    }
+  }
+
+  function worstAspect(rowItems, rowSum, rowSize) {
+    const areas = rowItems.map((item) => item.value);
+    const maxArea = Math.max(...areas);
+    const minArea = Math.min(...areas);
+    const rowLength = (rowSum / total) * ((width * height) / rowSize);
+    if (!rowSum || !rowSize || !minArea) {
+      return Number.POSITIVE_INFINITY;
+    }
+    return Math.max(
+      (rowSize * rowSize * maxArea) / (rowSum * rowSum),
+      (rowSum * rowSum) / (rowSize * rowSize * minArea)
+    );
+  }
+
+  while (remaining.length) {
+    const item = remaining[0];
+    const rowSum = row.reduce((sum, i) => sum + i.value, 0);
+    const rowSize = remainingWidth < remainingHeight ? remainingWidth : remainingHeight;
+    const newRow = [...row, item];
+    const newSum = rowSum + item.value;
+
+    if (!row.length || worstAspect(newRow, newSum, rowSize) <= worstAspect(row, rowSum, rowSize)) {
+      row = newRow;
+      remaining.shift();
+    } else {
+      const horizontal = remainingWidth >= remainingHeight;
+      layoutRow(row, rowSum, horizontal);
+      row = [];
+    }
+  }
+
+  if (row.length) {
+    const rowSum = row.reduce((sum, i) => sum + i.value, 0);
+    const horizontal = remainingWidth >= remainingHeight;
+    layoutRow(row, rowSum, horizontal);
+  }
+
+  return result;
+}
+
+function buildTreemapRows(rows, level, filterKey) {
+  if (level === "sector") {
+    const totals = rows.reduce((acc, row) => {
+      const sector = row.sector || "Unknown";
+      acc[sector] = acc[sector] || { name: sector, value: 0, dailyWeighted: 0 };
+      acc[sector].value += row.value;
+      acc[sector].dailyWeighted += row.value * row.dailyPct;
+      return acc;
+    }, {});
+    return Object.values(totals).map((item) => ({
+      ...item,
+      dailyPct: item.value ? item.dailyWeighted / item.value : 0,
+    }));
+  }
+
+  if (level === "industry") {
+    const totals = rows.reduce((acc, row) => {
+      if (row.sector !== filterKey) {
+        return acc;
+      }
+      const industry = row.industry || "Unknown";
+      acc[industry] = acc[industry] || { name: industry, value: 0, dailyWeighted: 0 };
+      acc[industry].value += row.value;
+      acc[industry].dailyWeighted += row.value * row.dailyPct;
+      return acc;
+    }, {});
+    return Object.values(totals).map((item) => ({
+      ...item,
+      dailyPct: item.value ? item.dailyWeighted / item.value : 0,
+    }));
+  }
+
+  if (level === "ticker") {
+    return rows
+      .filter((row) => row.industry === filterKey)
+      .map((row) => ({
+        name: row.ticker,
+        value: row.value,
+        dailyPct: row.dailyPct,
+      }));
+  }
+
+  return [];
+}
+
+function renderTreemap(rows, level = "sector", filterKey = null) {
+  const treemap = document.getElementById("treemap");
+  treemap.innerHTML = "";
+  const breadcrumb = document.getElementById("treemapBreadcrumb");
+
+  if (level === "sector") {
+    breadcrumb.textContent = "All Sectors";
+  } else if (level === "industry") {
+    breadcrumb.textContent = `Sector: ${filterKey}`;
+  } else {
+    breadcrumb.textContent = `Industry: ${filterKey}`;
+  }
+
+  const items = buildTreemapRows(rows, level, filterKey).filter((item) => item.value > 0);
+  const rects = squarify(items, 0, 0, treemap.clientWidth, treemap.clientHeight);
+
+  rects.forEach((item) => {
+    const block = document.createElement("div");
+    block.className = `treemap-block ${item.dailyPct >= 0 ? "green" : "red"}`;
+    block.style.left = `${item.rect.x}px`;
+    block.style.top = `${item.rect.y}px`;
+    block.style.width = `${Math.max(0, item.rect.width)}px`;
+    block.style.height = `${Math.max(0, item.rect.height)}px`;
+
+    const pct = fmtPercent.format(item.dailyPct || 0);
+    const value = fmtCurrency.format(item.value || 0);
+    block.innerHTML = `
+      <div>
+        <div class="title">${item.name}</div>
+        <div class="meta">${pct} today</div>
+        <div class="meta">${value}</div>
+      </div>
+    `;
+
+    if (level === "sector") {
+      block.addEventListener("click", () => {
+        treemapState.level = "industry";
+        treemapState.filterKey = item.name;
+        renderTreemap(rows, "industry", item.name);
+      });
+    } else if (level === "industry") {
+      block.addEventListener("click", () => {
+        treemapState.level = "ticker";
+        treemapState.filterKey = item.name;
+        renderTreemap(rows, "ticker", item.name);
+      });
+    } else {
+      block.addEventListener("click", () => {
+        treemapState.level = "sector";
+        treemapState.filterKey = null;
+        renderTreemap(rows, "sector");
+      });
+    }
+
+    treemap.appendChild(block);
   });
 }
 
@@ -256,6 +397,7 @@ function scheduleLiveRender() {
     renderSummary(liveRows);
     renderTable(liveRows);
     buildCharts(liveRows);
+    renderTreemap(liveRows, treemapState.level, treemapState.filterKey);
   });
 }
 
@@ -268,6 +410,11 @@ function applyLivePrice(ticker, price) {
   row.value = row.shares * price;
   scheduleLiveRender();
 }
+
+const treemapState = {
+  level: "sector",
+  filterKey: null,
+};
 
 async function fetchLivePricesFmp(rows) {
   if (!FMP_API_KEY) {
@@ -296,6 +443,11 @@ async function fetchLivePricesFmp(rows) {
 
   results.forEach((item) => {
     if (item && item.symbol && item.price) {
+      const pct = item.changesPercentage ? Number(item.changesPercentage) / 100 : 0;
+      const row = rows.find((r) => r.ticker === item.symbol);
+      if (row) {
+        row.dailyPct = Number.isFinite(pct) ? pct : row.dailyPct;
+      }
       applyLivePrice(item.symbol, Number(item.price));
     }
   });
@@ -434,16 +586,18 @@ async function loadData() {
     .map(normalizeRow)
     .filter((row) => row.ticker);
 
-  rows.sort((a, b) => b.value - a.value);
-
-  const sectorMap = await buildSectorMap(rows);
+  const profileMap = await buildProfileMap(rows);
   rows.forEach((row) => {
-    row.sector = sectorMap[row.ticker] || SECTOR_MAP[row.ticker] || "Unknown";
+    row.sector = profileMap[row.ticker]?.sector || SECTOR_MAP[row.ticker] || "Unknown";
+    row.industry = profileMap[row.ticker]?.industry || "Unknown";
   });
+
+  rows.sort((a, b) => b.value - a.value);
 
   renderSummary(rows);
   renderTable(rows);
   buildCharts(rows);
+  renderTreemap(rows, treemapState.level, treemapState.filterKey);
   startLivePrices(rows);
 
   document.getElementById("sourceLabel").textContent = sourceLabel;

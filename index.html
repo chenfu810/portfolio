@@ -63,13 +63,17 @@
           </div>
           <canvas id="tickerChart"></canvas>
         </div>
-        <div class="panel">
-          <div class="panel-header">
-            <h3>Allocation by Sector</h3>
-            <p class="subtle">Auto-filled when API key is set.</p>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h3>Allocation Map</h3>
+            <p class="subtle">Click a block to drill down.</p>
           </div>
-          <canvas id="sectorChart"></canvas>
+          <div id="treemapBreadcrumb" class="breadcrumb">All Sectors</div>
         </div>
+        <div id="treemap" class="treemap"></div>
       </section>
 
       <section class="panel">
