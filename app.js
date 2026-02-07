@@ -337,6 +337,32 @@ function buildTreemapRows(rows, level, filterKey) {
   return [];
 }
 
+function bindTreemapNavigation(element, rows, level, itemName) {
+  if (level === "sector") {
+    element.addEventListener("click", () => {
+      treemapState.level = "industry";
+      treemapState.filterKey = itemName;
+      renderTreemap(rows, "industry", itemName);
+    });
+    return;
+  }
+
+  if (level === "industry") {
+    element.addEventListener("click", () => {
+      treemapState.level = "ticker";
+      treemapState.filterKey = itemName;
+      renderTreemap(rows, "ticker", itemName);
+    });
+    return;
+  }
+
+  element.addEventListener("click", () => {
+    treemapState.level = "sector";
+    treemapState.filterKey = null;
+    renderTreemap(rows, "sector");
+  });
+}
+
 function renderTreemap(rows, level = "sector", filterKey = null) {
   const treemap = document.getElementById("treemap");
   treemap.innerHTML = "";
@@ -351,7 +377,49 @@ function renderTreemap(rows, level = "sector", filterKey = null) {
   }
 
   const items = buildTreemapRows(rows, level, filterKey).filter((item) => item.value > 0);
-  const rects = squarify(items, 0, 0, treemap.clientWidth, treemap.clientHeight);
+  const minArea = 3200;
+  let mainWidth = treemap.clientWidth;
+  let mainHeight = treemap.clientHeight;
+  let microPaneWidth = 0;
+  let mainItems = items;
+  let microItems = [];
+
+  // Keep tiny positions visible and clickable in a dedicated lane instead of unreadable slivers.
+  if (level === "ticker" && items.length) {
+    const initialRects = squarify(items, 0, 0, treemap.clientWidth, treemap.clientHeight);
+    microItems = initialRects
+      .filter((item) => item.rect.width * item.rect.height < minArea)
+      .map((item) => ({ name: item.name, value: item.value, dailyPct: item.dailyPct }));
+    if (microItems.length) {
+      if (microItems.length === items.length) {
+        const largest = items.reduce((best, item) =>
+          item.value > best.value ? item : best
+        );
+        microItems = microItems.filter((item) => item.name !== largest.name);
+      }
+
+      const microSet = new Set(microItems.map((item) => item.name));
+      mainItems = items.filter((item) => !microSet.has(item.name));
+      const paneGap = 8;
+      const desiredPaneWidth =
+        treemap.clientWidth < 540
+          ? 110
+          : Math.min(240, Math.max(150, Math.round(treemap.clientWidth * 0.24)));
+      microPaneWidth = Math.min(
+        desiredPaneWidth,
+        Math.max(88, treemap.clientWidth - 180 - paneGap)
+      );
+      mainWidth = treemap.clientWidth - microPaneWidth - paneGap;
+      if (mainWidth < 150 || microPaneWidth < 72) {
+        microPaneWidth = 0;
+        mainWidth = treemap.clientWidth;
+        mainItems = items;
+        microItems = [];
+      }
+    }
+  }
+
+  const rects = squarify(mainItems, 0, 0, mainWidth, mainHeight);
 
   rects.forEach((item) => {
     const block = document.createElement("div");
@@ -376,28 +444,42 @@ function renderTreemap(rows, level = "sector", filterKey = null) {
       </div>
     `;
 
-    if (level === "sector") {
-      block.addEventListener("click", () => {
-        treemapState.level = "industry";
-        treemapState.filterKey = item.name;
-        renderTreemap(rows, "industry", item.name);
-      });
-    } else if (level === "industry") {
-      block.addEventListener("click", () => {
-        treemapState.level = "ticker";
-        treemapState.filterKey = item.name;
-        renderTreemap(rows, "ticker", item.name);
-      });
-    } else {
-      block.addEventListener("click", () => {
-        treemapState.level = "sector";
-        treemapState.filterKey = null;
-        renderTreemap(rows, "sector");
-      });
-    }
+    bindTreemapNavigation(block, rows, level, item.name);
 
     treemap.appendChild(block);
   });
+
+  if (microItems.length && microPaneWidth > 0) {
+    const pane = document.createElement("div");
+    pane.className = "treemap-micro-pane";
+    pane.style.left = `${mainWidth + 8}px`;
+    pane.style.width = `${microPaneWidth}px`;
+
+    const title = document.createElement("div");
+    title.className = "treemap-micro-title";
+    title.textContent = "Small Positions";
+    pane.appendChild(title);
+
+    const list = document.createElement("div");
+    list.className = "treemap-micro-list";
+    microItems.forEach((item) => {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "treemap-micro-chip";
+      const heat = getHeatColor(item.dailyPct || 0);
+      chip.style.background = `linear-gradient(135deg, ${heat.strong}, ${heat.soft})`;
+      chip.style.borderColor = heat.border;
+      chip.innerHTML = `
+        <span>${item.name}</span>
+        <span>${fmtPercent.format(item.dailyPct || 0)}</span>
+      `;
+      bindTreemapNavigation(chip, rows, level, item.name);
+      list.appendChild(chip);
+    });
+    pane.appendChild(list);
+
+    treemap.appendChild(pane);
+  }
 }
 
 function scheduleLiveRender() {
