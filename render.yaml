@@ -1,7 +1,0 @@
-services:
-  - type: web
-    name: portfolio-pulse
-    env: node
-    buildCommand: npm install
-    startCommand: node server.js
-    autoDeploy: true

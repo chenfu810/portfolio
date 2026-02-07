@@ -613,8 +613,15 @@ document.getElementById("refreshBtn").addEventListener("click", () => {
   });
 });
 
-document.getElementById("holdingsSort").addEventListener("change", (event) => {
-  holdingsSortMode = event.target.value === "daily" ? "daily" : "value";
+document.getElementById("holdingsSortToggle").addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-sort]");
+  if (!button) {
+    return;
+  }
+  holdingsSortMode = button.dataset.sort === "daily" ? "daily" : "value";
+  document.querySelectorAll("#holdingsSortToggle .sort-pill").forEach((pill) => {
+    pill.classList.toggle("active", pill === button);
+  });
   renderTable(currentRows);
 });
 

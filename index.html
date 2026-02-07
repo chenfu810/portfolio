@@ -10,7 +10,7 @@
       href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Space+Grotesk:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="styles.css?v=20260207-3" />
     <link rel="icon" href="favicon.svg" type="image/svg+xml" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   </head>
@@ -82,12 +82,10 @@
       <section class="panel table-panel">
         <div class="panel-header">
           <h3>Holdings</h3>
-          <div class="sort-wrap">
-            <label class="subtle" for="holdingsSort">Sort by</label>
-            <select id="holdingsSort" class="sort-select">
-              <option value="value">Value</option>
-              <option value="daily">Daily %</option>
-            </select>
+          <div class="sort-wrap" id="holdingsSortToggle" role="group" aria-label="Sort holdings">
+            <span class="sort-label">Sort by</span>
+            <button type="button" class="sort-pill active" data-sort="value">Value</button>
+            <button type="button" class="sort-pill" data-sort="daily">Daily %</button>
           </div>
         </div>
         <div class="table-wrap">
@@ -114,6 +112,6 @@
       </section>
     </main>
 
-    <script src="app.js?v=20260207-2"></script>
+    <script src="app.js?v=20260207-3"></script>
   </body>
 </html>
