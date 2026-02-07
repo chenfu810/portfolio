@@ -7,15 +7,6 @@ const FMP_API_KEY = "";
 const FMP_QUOTE_BASE = "https://financialmodelingprep.com/stable/batch-quote";
 const LIVE_PRICE_REFRESH_MS = 60_000;
 const LIVE_PRICE_MAX_BACKOFF_MS = 5 * 60_000;
-const PROFILE_REQUEST_DELAY_MS = 1100;
-
-const SECTOR_MAP = {
-  AAPL: "Consumer Tech",
-  MSFT: "Enterprise Tech",
-  NVDA: "Semiconductors",
-  AMZN: "Consumer Tech",
-  TSLA: "Automotive",
-};
 
 const SAMPLE_CSV = `ticket,shares,price,daily change %
 NVDA,100,765.42,1.1%
@@ -73,8 +64,7 @@ function normalizeRow(row) {
         ? dailyPctValue / 100
         : dailyPctValue
       : 0;
-  const value =
-    Number(normalized["value"] || 0) || (shares && price ? shares * price : 0);
+  const value = shares * price;
   const monthPctRaw = normalized["monthly change %"] || normalized["month change %"];
   const yearPctRaw = normalized["yearly change %"] || normalized["year change %"];
 
@@ -115,61 +105,6 @@ function formatHistoryLabel(label) {
     });
   }
   return label;
-}
-
-async function fetchProfileForTicker(ticker) {
-  if (!FMP_API_KEY) {
-    return { sector: SECTOR_MAP[ticker] || "Unknown", industry: "Unknown" };
-  }
-
-  const cacheKey = `profile_${ticker}`;
-  const cached = localStorage.getItem(cacheKey);
-  if (cached) {
-    return JSON.parse(cached);
-  }
-
-  const url = `https://financialmodelingprep.com/api/v3/profile/${ticker}?apikey=${FMP_API_KEY}`;
-  const response = await fetch(url);
-  if (!response.ok) {
-    return { sector: SECTOR_MAP[ticker] || "Unknown", industry: "Unknown" };
-  }
-  const data = await response.json();
-  const profile = {
-    sector: data?.[0]?.sector || SECTOR_MAP[ticker] || "Unknown",
-    industry: data?.[0]?.industry || "Unknown",
-  };
-  localStorage.setItem(cacheKey, JSON.stringify(profile));
-  return profile;
-}
-
-async function buildProfileMap(rows) {
-  const map = {};
-  const tickers = rows
-    .map((row) => row.ticker)
-    .filter((ticker) => {
-      if (!ticker) {
-        return false;
-      }
-      return ticker.toUpperCase() !== "CASH";
-    });
-  if (!FMP_API_KEY) {
-    tickers.forEach((ticker) => {
-      map[ticker] = { sector: SECTOR_MAP[ticker] || "Unknown", industry: "Unknown" };
-    });
-    return map;
-  }
-
-  const concurrency = 4;
-  let index = 0;
-  const workers = Array.from({ length: concurrency }, async () => {
-    while (index < tickers.length) {
-      const ticker = tickers[index++];
-      map[ticker] = await fetchProfileForTicker(ticker);
-      await new Promise((resolve) => setTimeout(resolve, PROFILE_REQUEST_DELAY_MS));
-    }
-  });
-  await Promise.all(workers);
-  return map;
 }
 
 function getHeatColor(pct) {
@@ -292,87 +227,24 @@ function squarify(items, x, y, width, height) {
   return result;
 }
 
-function buildTreemapRows(rows, level, filterKey) {
-  if (level === "sector") {
-    const totals = rows.reduce((acc, row) => {
-      const sector = row.sector || "Unknown";
-      acc[sector] = acc[sector] || { name: sector, value: 0, dailyWeighted: 0 };
-      acc[sector].value += row.value;
-      acc[sector].dailyWeighted += row.value * row.dailyPct;
-      return acc;
-    }, {});
-    return Object.values(totals).map((item) => ({
-      ...item,
-      dailyPct: item.value ? item.dailyWeighted / item.value : 0,
+function buildTreemapRows(rows) {
+  return rows
+    .filter((row) => row.ticker && row.value > 0)
+    .map((row) => ({
+      name: row.ticker.toUpperCase(),
+      value: row.value,
+      dailyPct: row.dailyPct,
     }));
-  }
-
-  if (level === "industry") {
-    const totals = rows.reduce((acc, row) => {
-      if (row.sector !== filterKey) {
-        return acc;
-      }
-      const industry = row.industry || "Unknown";
-      acc[industry] = acc[industry] || { name: industry, value: 0, dailyWeighted: 0 };
-      acc[industry].value += row.value;
-      acc[industry].dailyWeighted += row.value * row.dailyPct;
-      return acc;
-    }, {});
-    return Object.values(totals).map((item) => ({
-      ...item,
-      dailyPct: item.value ? item.dailyWeighted / item.value : 0,
-    }));
-  }
-
-  if (level === "ticker") {
-    return rows
-      .filter((row) => row.industry === filterKey)
-      .map((row) => ({
-        name: row.ticker,
-        value: row.value,
-        dailyPct: row.dailyPct,
-      }));
-  }
-
-  return [];
 }
 
-function bindTreemapNavigation(element, rows, level, itemName) {
-  if (level === "sector") {
-    element.addEventListener("click", () => {
-      treemapState.level = "industry";
-      treemapState.filterKey = itemName;
-      renderTreemap(rows, "industry", itemName);
-    });
-    return;
-  }
-
-  if (level === "industry") {
-    element.addEventListener("click", () => {
-      treemapState.level = "ticker";
-      treemapState.filterKey = itemName;
-      renderTreemap(rows, "ticker", itemName);
-    });
-    return;
-  }
-  // Leaf nodes should not force navigation back to top level.
-}
-
-function renderTreemap(rows, level = "sector", filterKey = null) {
+function renderTreemap(rows) {
   const treemap = document.getElementById("treemap");
   treemap.innerHTML = "";
   const breadcrumb = document.getElementById("treemapBreadcrumb");
+  breadcrumb.textContent = "All Stocks";
 
-  if (level === "sector") {
-    breadcrumb.textContent = "All Sectors";
-  } else if (level === "industry") {
-    breadcrumb.textContent = `Sector: ${filterKey}`;
-  } else {
-    breadcrumb.textContent = `Industry: ${filterKey}`;
-  }
-
-  const items = buildTreemapRows(rows, level, filterKey).filter((item) => item.value > 0);
-  const minArea = level === "sector" ? 5200 : level === "industry" ? 4200 : 3200;
+  const items = buildTreemapRows(rows);
+  const minArea = 3200;
   let mainWidth = treemap.clientWidth;
   let mainHeight = treemap.clientHeight;
   let microPaneWidth = 0;
@@ -419,7 +291,7 @@ function renderTreemap(rows, level = "sector", filterKey = null) {
   rects.forEach((item) => {
     const block = document.createElement("div");
     const area = item.rect.width * item.rect.height;
-    block.className = `treemap-block ${getSizeClass(area)}${level === "ticker" ? " leaf" : ""}`;
+    block.className = `treemap-block ${getSizeClass(area)} leaf`;
     block.style.left = `${item.rect.x}px`;
     block.style.top = `${item.rect.y}px`;
     block.style.width = `${Math.max(0, item.rect.width)}px`;
@@ -438,8 +310,6 @@ function renderTreemap(rows, level = "sector", filterKey = null) {
         <div class="meta value">${value}</div>
       </div>
     `;
-
-    bindTreemapNavigation(block, rows, level, item.name);
 
     treemap.appendChild(block);
   });
@@ -460,7 +330,7 @@ function renderTreemap(rows, level = "sector", filterKey = null) {
     microItems.forEach((item) => {
       const chip = document.createElement("button");
       chip.type = "button";
-      chip.className = `treemap-micro-chip${level === "ticker" ? " leaf" : ""}`;
+      chip.className = "treemap-micro-chip leaf";
       const heat = getHeatColor(item.dailyPct || 0);
       chip.style.background = `linear-gradient(135deg, ${heat.strong}, ${heat.soft})`;
       chip.style.borderColor = heat.border;
@@ -468,7 +338,6 @@ function renderTreemap(rows, level = "sector", filterKey = null) {
         <span>${item.name}</span>
         <span>${fmtPercent.format(item.dailyPct || 0)}</span>
       `;
-      bindTreemapNavigation(chip, rows, level, item.name);
       list.appendChild(chip);
     });
     pane.appendChild(list);
@@ -486,7 +355,7 @@ function scheduleLiveRender() {
     liveUpdateScheduled = false;
     renderSummary(liveRows);
     renderTable(liveRows);
-    renderTreemap(liveRows, treemapState.level, treemapState.filterKey);
+    renderTreemap(liveRows);
   });
 }
 
@@ -499,11 +368,6 @@ function applyLivePrice(ticker, price) {
   row.value = row.shares * price;
   scheduleLiveRender();
 }
-
-const treemapState = {
-  level: "sector",
-  filterKey: null,
-};
 
 async function fetchLivePricesFmp(rows) {
   if (!FMP_API_KEY) {
@@ -705,16 +569,11 @@ async function loadData() {
     sourceLabel = "Sample data (sheet empty)";
   }
 
-  rows.forEach((row) => {
-    row.sector = SECTOR_MAP[row.ticker] || "Unknown";
-    row.industry = "Unknown";
-  });
-
   rows.sort((a, b) => b.value - a.value);
 
   renderSummary(rows);
   renderTable(rows);
-  renderTreemap(rows, treemapState.level, treemapState.filterKey);
+  renderTreemap(rows);
   const hasSheetPrices = rows.some((row) => row.price > 0);
   if (!hasSheetPrices) {
     startLivePrices(rows);
@@ -735,14 +594,6 @@ async function loadData() {
     }
   }
   renderHistory(historyData);
-
-  buildProfileMap(rows).then((profileMap) => {
-    rows.forEach((row) => {
-      row.sector = profileMap[row.ticker]?.sector || row.sector || "Unknown";
-      row.industry = profileMap[row.ticker]?.industry || row.industry || "Unknown";
-    });
-    renderTreemap(rows, treemapState.level, treemapState.filterKey);
-  });
 }
 
 document.getElementById("refreshBtn").addEventListener("click", () => {
