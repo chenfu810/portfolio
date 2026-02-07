@@ -17,12 +17,12 @@ const SECTOR_MAP = {
   TSLA: "Automotive",
 };
 
-const SAMPLE_CSV = `ticket,shares
-NVDA,100
-AAPL,50
-MSFT,20
-AMZN,12
-TSLA,8`;
+const SAMPLE_CSV = `ticket,shares,price,daily change %
+NVDA,100,765.42,1.1%
+AAPL,50,183.27,-0.4%
+MSFT,20,421.88,0.8%
+AMZN,12,162.55,0.5%
+TSLA,8,192.13,-1.6%`;
 
 const fmtCurrency = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -616,17 +616,29 @@ async function loadData() {
   let sourceLabel = "Sample data";
 
   if (SHEET_CSV_URL) {
-    const response = await fetch(SHEET_CSV_URL);
-    if (!response.ok) {
-      throw new Error("Failed to fetch sheet data.");
+    try {
+      const response = await fetch(SHEET_CSV_URL);
+      if (!response.ok) {
+        throw new Error("Failed to fetch sheet data.");
+      }
+      csvText = await response.text();
+      sourceLabel = "Google Sheets (read-only)";
+    } catch (err) {
+      csvText = SAMPLE_CSV;
+      sourceLabel = "Sample data (sheet unavailable)";
     }
-    csvText = await response.text();
-    sourceLabel = "Google Sheets (read-only)";
   }
 
-  const rows = parseCSV(csvText)
+  let rows = parseCSV(csvText)
     .map(normalizeRow)
     .filter((row) => row.ticker);
+
+  if (!rows.length && csvText !== SAMPLE_CSV) {
+    rows = parseCSV(SAMPLE_CSV)
+      .map(normalizeRow)
+      .filter((row) => row.ticker);
+    sourceLabel = "Sample data (sheet empty)";
+  }
 
   const profileMap = await buildProfileMap(rows);
   rows.forEach((row) => {
