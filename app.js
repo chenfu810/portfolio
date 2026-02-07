@@ -35,7 +35,6 @@ const fmtPercent = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 2,
 });
 
-let tickerChart;
 let historyChart;
 let liveRows = [];
 let liveUpdateScheduled = false;
@@ -153,63 +152,48 @@ async function buildProfileMap(rows) {
       }
       return ticker.toUpperCase() !== "CASH";
     });
-  for (const ticker of tickers) {
-    map[ticker] = await fetchProfileForTicker(ticker);
-    await new Promise((resolve) => setTimeout(resolve, PROFILE_REQUEST_DELAY_MS));
+  if (!FMP_API_KEY) {
+    tickers.forEach((ticker) => {
+      map[ticker] = { sector: SECTOR_MAP[ticker] || "Unknown", industry: "Unknown" };
+    });
+    return map;
   }
+
+  const concurrency = 4;
+  let index = 0;
+  const workers = Array.from({ length: concurrency }, async () => {
+    while (index < tickers.length) {
+      const ticker = tickers[index++];
+      map[ticker] = await fetchProfileForTicker(ticker);
+      await new Promise((resolve) => setTimeout(resolve, PROFILE_REQUEST_DELAY_MS));
+    }
+  });
+  await Promise.all(workers);
   return map;
 }
 
-function buildCharts(rows) {
-  const labels = rows.map((row) => row.ticker);
-  const values = rows.map((row) => row.value);
-  const dailyPct = rows.map((row) => row.dailyPct);
+function getHeatColor(pct) {
+  const clamped = Math.max(-0.12, Math.min(0.12, pct || 0));
+  const intensity = Math.min(1, Math.abs(clamped) / 0.12);
+  const base = clamped >= 0 ? [98, 217, 156] : [244, 91, 105];
+  const dark = [16, 20, 32];
+  const mix = (a, b) => Math.round(a * (0.35 + 0.65 * intensity) + b * 0.65);
+  const r = mix(base[0], dark[0]);
+  const g = mix(base[1], dark[1]);
+  const b = mix(base[2], dark[2]);
+  return {
+    strong: `rgba(${r}, ${g}, ${b}, 0.92)`,
+    soft: `rgba(${r}, ${g}, ${b}, 0.24)`,
+    border: `rgba(${r}, ${g}, ${b}, 0.55)`,
+  };
+}
 
-  const palette = [
-    "#f8c15c",
-    "#8df0d2",
-    "#6aa2ff",
-    "#f45b69",
-    "#c6a5ff",
-    "#58c4e5",
-    "#f0a6ca",
-  ];
-
-  if (tickerChart) {
-    tickerChart.destroy();
-  }
-
-  tickerChart = new Chart(document.getElementById("tickerChart"), {
-    type: "doughnut",
-    data: {
-      labels,
-      datasets: [
-        {
-          data: values,
-          backgroundColor: labels.map((_, idx) => palette[idx % palette.length]),
-          borderWidth: 0,
-        },
-      ],
-    },
-    options: {
-      cutout: "62%",
-      plugins: {
-        legend: {
-          labels: { color: "#e0e6f3" },
-        },
-        tooltip: {
-          callbacks: {
-            label: (ctx) => {
-              const pct = fmtPercent.format(dailyPct[ctx.dataIndex] || 0);
-              const val = fmtCurrency.format(values[ctx.dataIndex] || 0);
-              return `${ctx.label}: ${val} (${pct} daily)`;
-            },
-          },
-        },
-      },
-    },
-  });
-
+function getSizeClass(area) {
+  if (area > 140000) return "size-xl";
+  if (area > 90000) return "size-lg";
+  if (area > 45000) return "size-md";
+  if (area > 18000) return "size-sm";
+  return "size-xs";
 }
 
 function renderTable(rows) {
@@ -371,19 +355,24 @@ function renderTreemap(rows, level = "sector", filterKey = null) {
 
   rects.forEach((item) => {
     const block = document.createElement("div");
-    block.className = `treemap-block ${item.dailyPct >= 0 ? "green" : "red"}`;
+    const area = item.rect.width * item.rect.height;
+    block.className = `treemap-block ${getSizeClass(area)}`;
     block.style.left = `${item.rect.x}px`;
     block.style.top = `${item.rect.y}px`;
     block.style.width = `${Math.max(0, item.rect.width)}px`;
     block.style.height = `${Math.max(0, item.rect.height)}px`;
+
+    const heat = getHeatColor(item.dailyPct || 0);
+    block.style.background = `linear-gradient(135deg, ${heat.strong}, ${heat.soft})`;
+    block.style.borderColor = heat.border;
 
     const pct = fmtPercent.format(item.dailyPct || 0);
     const value = fmtCurrency.format(item.value || 0);
     block.innerHTML = `
       <div>
         <div class="title">${item.name}</div>
-        <div class="meta">${pct} today</div>
-        <div class="meta">${value}</div>
+        <div class="meta">${pct}</div>
+        <div class="meta value">${value}</div>
       </div>
     `;
 
@@ -420,7 +409,6 @@ function scheduleLiveRender() {
     liveUpdateScheduled = false;
     renderSummary(liveRows);
     renderTable(liveRows);
-    buildCharts(liveRows);
     renderTreemap(liveRows, treemapState.level, treemapState.filterKey);
   });
 }
@@ -640,17 +628,15 @@ async function loadData() {
     sourceLabel = "Sample data (sheet empty)";
   }
 
-  const profileMap = await buildProfileMap(rows);
   rows.forEach((row) => {
-    row.sector = profileMap[row.ticker]?.sector || SECTOR_MAP[row.ticker] || "Unknown";
-    row.industry = profileMap[row.ticker]?.industry || "Unknown";
+    row.sector = SECTOR_MAP[row.ticker] || "Unknown";
+    row.industry = "Unknown";
   });
 
   rows.sort((a, b) => b.value - a.value);
 
   renderSummary(rows);
   renderTable(rows);
-  buildCharts(rows);
   renderTreemap(rows, treemapState.level, treemapState.filterKey);
   const hasSheetPrices = rows.some((row) => row.price > 0);
   if (!hasSheetPrices) {
@@ -672,6 +658,14 @@ async function loadData() {
     }
   }
   renderHistory(historyData);
+
+  buildProfileMap(rows).then((profileMap) => {
+    rows.forEach((row) => {
+      row.sector = profileMap[row.ticker]?.sector || row.sector || "Unknown";
+      row.industry = profileMap[row.ticker]?.industry || row.industry || "Unknown";
+    });
+    renderTreemap(rows, treemapState.level, treemapState.filterKey);
+  });
 }
 
 document.getElementById("refreshBtn").addEventListener("click", () => {
