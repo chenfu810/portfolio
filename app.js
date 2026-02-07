@@ -31,6 +31,7 @@ let liveRows = [];
 let liveUpdateScheduled = false;
 let holdingsSortMode = "value";
 let currentRows = [];
+let currentHistoryData = [];
 
 const TREEMAP_GAP_PX = 6;
 const TREEMAP_MIN_MAIN_SIDE_PX = 48;
@@ -111,6 +112,56 @@ function formatHistoryLabel(label) {
     });
   }
   return label;
+}
+
+function toIsoLocal(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function parseDateLoose(value) {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  parsed.setHours(0, 0, 0, 0);
+  return parsed;
+}
+
+function buildDailyPLMap(history) {
+  const sorted = history
+    .map((row) => ({
+      date: parseDateLoose(row.date),
+      value: Number(row.value),
+    }))
+    .filter((row) => row.date && Number.isFinite(row.value))
+    .sort((a, b) => a.date - b.date);
+
+  const map = new Map();
+  for (let i = 1; i < sorted.length; i += 1) {
+    const current = sorted[i];
+    const previous = sorted[i - 1];
+    map.set(toIsoLocal(current.date), current.value - previous.value);
+  }
+  return {
+    map,
+    lastDate: sorted.length ? sorted[sorted.length - 1].date : null,
+  };
+}
+
+function getCalendarCellColor(plValue, maxAbs) {
+  if (!Number.isFinite(plValue)) {
+    return "#121a2a";
+  }
+  const ratio = maxAbs ? Math.min(1, Math.abs(plValue) / maxAbs) : 0;
+  const from = plValue >= 0 ? [36, 81, 58] : [88, 44, 53];
+  const to = plValue >= 0 ? [97, 220, 150] : [236, 111, 124];
+  const r = Math.round(from[0] + (to[0] - from[0]) * ratio);
+  const g = Math.round(from[1] + (to[1] - from[1]) * ratio);
+  const b = Math.round(from[2] + (to[2] - from[2]) * ratio);
+  return `rgb(${r}, ${g}, ${b})`;
 }
 
 function getHeatColor(pct) {
@@ -314,7 +365,7 @@ function renderTreemap(rows) {
     block.innerHTML = `
       <div>
         <div class="title">${item.name}</div>
-        <div class="meta">${pct}</div>
+        <div class="meta pct">${pct}</div>
         <div class="meta value">${value}</div>
       </div>
     `;
@@ -364,6 +415,7 @@ function scheduleLiveRender() {
     liveUpdateScheduled = false;
     currentRows = liveRows;
     renderSummary(liveRows);
+    renderDailyGainLoss(liveRows, currentHistoryData);
     renderTable(liveRows);
     renderTreemap(liveRows);
   });
@@ -495,6 +547,102 @@ function renderHistory(history) {
   });
 }
 
+function renderDailyGainLoss(rows, historyData) {
+  const totalValue = rows.reduce((sum, row) => sum + row.value, 0);
+  const dailyChangeValue = rows.reduce((sum, row) => sum + row.value * row.dailyPct, 0);
+  const dailyChangePct = totalValue ? dailyChangeValue / totalValue : 0;
+
+  const totalEl = document.getElementById("dailyTotalPL");
+  const metaEl = document.getElementById("dailyTotalPLMeta");
+  const monthsEl = document.getElementById("dailyCalendarMonths");
+  const emptyEl = document.getElementById("dailyCalendarEmpty");
+
+  totalEl.textContent = fmtCurrency.format(dailyChangeValue);
+  totalEl.style.color = dailyChangeValue >= 0 ? "#62d99c" : "#f45b69";
+  metaEl.textContent = `Today: ${fmtPercent.format(dailyChangePct)}`;
+  metaEl.style.color = dailyChangeValue >= 0 ? "#62d99c" : "#f45b69";
+
+  const { map: plMap, lastDate } = buildDailyPLMap(historyData);
+  monthsEl.innerHTML = "";
+
+  if (!plMap.size) {
+    emptyEl.style.display = "block";
+    monthsEl.style.display = "none";
+    return;
+  }
+
+  emptyEl.style.display = "none";
+  monthsEl.style.display = "grid";
+
+  const maxAbs = Array.from(plMap.values()).reduce((best, value) => {
+    return Math.max(best, Math.abs(value));
+  }, 0);
+  const anchorDate = lastDate || new Date();
+  const monthsToShow = 3;
+  const weekdayLabels = ["S", "M", "T", "W", "T", "F", "S"];
+
+  for (let offset = monthsToShow - 1; offset >= 0; offset -= 1) {
+    const monthDate = new Date(anchorDate.getFullYear(), anchorDate.getMonth() - offset, 1);
+    const monthCard = document.createElement("div");
+    monthCard.className = "daily-month-card";
+
+    const title = document.createElement("div");
+    title.className = "daily-month-title";
+    title.textContent = monthDate.toLocaleDateString("en-US", {
+      month: "long",
+      year: "numeric",
+    });
+    monthCard.appendChild(title);
+
+    const weekdaysRow = document.createElement("div");
+    weekdaysRow.className = "daily-weekdays";
+    weekdayLabels.forEach((label) => {
+      const day = document.createElement("span");
+      day.textContent = label;
+      weekdaysRow.appendChild(day);
+    });
+    monthCard.appendChild(weekdaysRow);
+
+    const grid = document.createElement("div");
+    grid.className = "daily-month-grid";
+
+    const firstDay = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1).getDay();
+    const daysInMonth = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0).getDate();
+
+    for (let i = 0; i < firstDay; i += 1) {
+      const blank = document.createElement("div");
+      blank.className = "daily-cell blank";
+      grid.appendChild(blank);
+    }
+
+    for (let dayNum = 1; dayNum <= daysInMonth; dayNum += 1) {
+      const dayDate = new Date(monthDate.getFullYear(), monthDate.getMonth(), dayNum);
+      const key = toIsoLocal(dayDate);
+      const pl = plMap.get(key);
+      const cell = document.createElement("div");
+      cell.className = `daily-cell${Number.isFinite(pl) ? " data" : " nodata"}`;
+      cell.textContent = String(dayNum);
+      if (Number.isFinite(pl)) {
+        cell.style.backgroundColor = getCalendarCellColor(pl, maxAbs);
+        const signed = pl >= 0 ? `+${fmtCurrency.format(pl)}` : fmtCurrency.format(pl);
+        cell.title = `${dayDate.toLocaleDateString("en-US")}: ${signed}`;
+      } else {
+        cell.title = `${dayDate.toLocaleDateString("en-US")}: No data`;
+      }
+      grid.appendChild(cell);
+    }
+
+    while (grid.children.length % 7 !== 0) {
+      const blank = document.createElement("div");
+      blank.className = "daily-cell blank";
+      grid.appendChild(blank);
+    }
+
+    monthCard.appendChild(grid);
+    monthsEl.appendChild(monthCard);
+  }
+}
+
 function renderSummary(rows) {
   const totalValue = rows.reduce((sum, row) => sum + row.value, 0);
   const dailyChangeValue = rows.reduce(
@@ -581,8 +729,10 @@ async function loadData() {
 
   rows.sort((a, b) => b.value - a.value);
 
+  currentHistoryData = [];
   currentRows = rows;
   renderSummary(rows);
+  renderDailyGainLoss(rows, currentHistoryData);
   renderTable(rows);
   renderTreemap(rows);
   const hasSheetPrices = rows.some((row) => row.price > 0);
@@ -604,7 +754,9 @@ async function loadData() {
       historyData = [];
     }
   }
+  currentHistoryData = historyData;
   renderHistory(historyData);
+  renderDailyGainLoss(rows, historyData);
 }
 
 document.getElementById("refreshBtn").addEventListener("click", () => {

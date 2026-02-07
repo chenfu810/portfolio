@@ -230,7 +230,12 @@ h3 {
   font-size: 11px;
 }
 
-.treemap-block.size-xs .meta {
+.treemap-block.size-xs .pct {
+  margin-top: 4px;
+  font-size: 10px;
+}
+
+.treemap-block.size-xs .value {
   display: none;
 }
 
@@ -302,6 +307,72 @@ h3 {
 .subtle {
   color: var(--muted);
   font-size: 12px;
+}
+
+.daily-total {
+  font-family: "Fraunces", serif;
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.daily-calendar-months {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.daily-month-card {
+  background: #101726;
+  border: 1px solid #263145;
+  border-radius: 12px;
+  padding: 10px;
+}
+
+.daily-month-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #dbe5fa;
+  margin-bottom: 8px;
+}
+
+.daily-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.daily-weekdays span {
+  font-size: 10px;
+  color: #8595b3;
+  text-align: center;
+}
+
+.daily-month-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+
+.daily-cell {
+  aspect-ratio: 1 / 1;
+  border-radius: 6px;
+  border: 1px solid #233047;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: #eef2fb;
+}
+
+.daily-cell.nodata {
+  background: #121a2a;
+  color: #60708f;
+}
+
+.daily-cell.blank {
+  background: transparent;
+  border-color: transparent;
 }
 
 .sort-wrap {
