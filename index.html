@@ -82,7 +82,13 @@
       <section class="panel table-panel">
         <div class="panel-header">
           <h3>Holdings</h3>
-          <p class="subtle">Sorted by value (highest first).</p>
+          <div class="sort-wrap">
+            <label class="subtle" for="holdingsSort">Sort by</label>
+            <select id="holdingsSort" class="sort-select">
+              <option value="value">Value</option>
+              <option value="daily">Daily %</option>
+            </select>
+          </div>
         </div>
         <div class="table-wrap">
           <table>
@@ -108,6 +114,6 @@
       </section>
     </main>
 
-    <script src="app.js?v=20260207-1"></script>
+    <script src="app.js?v=20260207-2"></script>
   </body>
 </html>

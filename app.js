@@ -29,6 +29,12 @@ const fmtPercent = new Intl.NumberFormat("en-US", {
 let historyChart;
 let liveRows = [];
 let liveUpdateScheduled = false;
+let holdingsSortMode = "value";
+let currentRows = [];
+
+const TREEMAP_GAP_PX = 6;
+const TREEMAP_MIN_MAIN_SIDE_PX = 48;
+const TREEMAP_MICRO_THRESHOLD_PX = 44;
 
 function parseCSV(text) {
   const lines = text.trim().split(/\r?\n/);
@@ -109,17 +115,15 @@ function formatHistoryLabel(label) {
 
 function getHeatColor(pct) {
   const clamped = Math.max(-0.12, Math.min(0.12, pct || 0));
-  const intensity = Math.min(1, Math.abs(clamped) / 0.12);
-  const base = clamped >= 0 ? [98, 217, 156] : [244, 91, 105];
-  const dark = [16, 20, 32];
-  const mix = (a, b) => Math.round(a * (0.35 + 0.65 * intensity) + b * 0.65);
-  const r = mix(base[0], dark[0]);
-  const g = mix(base[1], dark[1]);
-  const b = mix(base[2], dark[2]);
+  const t = Math.min(1, Math.abs(clamped) / 0.12);
+  const from = clamped >= 0 ? [33, 88, 56] : [98, 41, 48];
+  const to = clamped >= 0 ? [86, 196, 132] : [229, 96, 107];
+  const r = Math.round(from[0] + (to[0] - from[0]) * t);
+  const g = Math.round(from[1] + (to[1] - from[1]) * t);
+  const b = Math.round(from[2] + (to[2] - from[2]) * t);
   return {
-    strong: `rgba(${r}, ${g}, ${b}, 0.92)`,
-    soft: `rgba(${r}, ${g}, ${b}, 0.24)`,
-    border: `rgba(${r}, ${g}, ${b}, 0.55)`,
+    fill: `rgb(${r}, ${g}, ${b})`,
+    border: `rgb(${Math.max(0, r - 20)}, ${Math.max(0, g - 20)}, ${Math.max(0, b - 20)})`,
   };
 }
 
@@ -131,10 +135,31 @@ function getSizeClass(area) {
   return "size-xs";
 }
 
+function getSortedRows(rows) {
+  const sorted = rows.slice();
+  if (holdingsSortMode === "daily") {
+    sorted.sort((a, b) => {
+      if (b.dailyPct !== a.dailyPct) {
+        return b.dailyPct - a.dailyPct;
+      }
+      return b.value - a.value;
+    });
+    return sorted;
+  }
+  sorted.sort((a, b) => {
+    if (b.value !== a.value) {
+      return b.value - a.value;
+    }
+    return b.dailyPct - a.dailyPct;
+  });
+  return sorted;
+}
+
 function renderTable(rows) {
   const tbody = document.getElementById("holdingsTable");
   tbody.innerHTML = "";
-  rows.forEach((row) => {
+  const sortedRows = getSortedRows(rows);
+  sortedRows.forEach((row) => {
     const tr = document.createElement("tr");
     const priceDisplay = row.price ? fmtCurrency.format(row.price) : "—";
     const valueDisplay = row.value ? fmtCurrency.format(row.value) : "—";
@@ -151,82 +176,6 @@ function renderTable(rows) {
   });
 }
 
-function squarify(items, x, y, width, height) {
-  const total = items.reduce((sum, item) => sum + item.value, 0);
-  if (!total) {
-    return [];
-  }
-  const result = [];
-  let remaining = items.slice().sort((a, b) => b.value - a.value);
-  let row = [];
-  let remainingWidth = width;
-  let remainingHeight = height;
-  let offsetX = x;
-  let offsetY = y;
-
-  function layoutRow(rowItems, rowSum, horizontal) {
-    const rowSize = horizontal ? remainingHeight : remainingWidth;
-    const rowLength = (rowSum / total) * ((width * height) / rowSize);
-    let offset = 0;
-
-    rowItems.forEach((item) => {
-      const itemSize = (item.value / rowSum) * rowSize;
-      const rect = horizontal
-        ? { x: offsetX + offset, y: offsetY, width: itemSize, height: rowLength }
-        : { x: offsetX, y: offsetY + offset, width: rowLength, height: itemSize };
-      result.push({ ...item, rect });
-      offset += itemSize;
-    });
-
-    if (horizontal) {
-      offsetY += rowLength;
-      remainingHeight -= rowLength;
-    } else {
-      offsetX += rowLength;
-      remainingWidth -= rowLength;
-    }
-  }
-
-  function worstAspect(rowItems, rowSum, rowSize) {
-    const areas = rowItems.map((item) => item.value);
-    const maxArea = Math.max(...areas);
-    const minArea = Math.min(...areas);
-    const rowLength = (rowSum / total) * ((width * height) / rowSize);
-    if (!rowSum || !rowSize || !minArea) {
-      return Number.POSITIVE_INFINITY;
-    }
-    return Math.max(
-      (rowSize * rowSize * maxArea) / (rowSum * rowSum),
-      (rowSum * rowSum) / (rowSize * rowSize * minArea)
-    );
-  }
-
-  while (remaining.length) {
-    const item = remaining[0];
-    const rowSum = row.reduce((sum, i) => sum + i.value, 0);
-    const rowSize = remainingWidth < remainingHeight ? remainingWidth : remainingHeight;
-    const newRow = [...row, item];
-    const newSum = rowSum + item.value;
-
-    if (!row.length || worstAspect(newRow, newSum, rowSize) <= worstAspect(row, rowSum, rowSize)) {
-      row = newRow;
-      remaining.shift();
-    } else {
-      const horizontal = remainingWidth >= remainingHeight;
-      layoutRow(row, rowSum, horizontal);
-      row = [];
-    }
-  }
-
-  if (row.length) {
-    const rowSum = row.reduce((sum, i) => sum + i.value, 0);
-    const horizontal = remainingWidth >= remainingHeight;
-    layoutRow(row, rowSum, horizontal);
-  }
-
-  return result;
-}
-
 function buildTreemapRows(rows) {
   return rows
     .filter((row) => row.ticker && row.value > 0)
@@ -234,7 +183,54 @@ function buildTreemapRows(rows) {
       name: row.ticker.toUpperCase(),
       value: row.value,
       dailyPct: row.dailyPct,
-    }));
+    }))
+    .sort((a, b) => b.value - a.value);
+}
+
+function getTargetSquares(items, width, height) {
+  const total = items.reduce((sum, item) => sum + item.value, 0);
+  if (!total || width <= 0 || height <= 0) {
+    return [];
+  }
+  const area = width * height;
+  return items.map((item) => ({
+    ...item,
+    targetSide: Math.sqrt((item.value / total) * area),
+  }));
+}
+
+function packSquares(items, width, height, minSide) {
+  const placed = [];
+  const overflow = [];
+  let x = 0;
+  let y = 0;
+  let rowHeight = 0;
+
+  items.forEach((item) => {
+    const side = Math.max(minSide, Math.min(width, item.targetSide));
+    if (x > 0 && x + side > width) {
+      x = 0;
+      y += rowHeight + TREEMAP_GAP_PX;
+      rowHeight = 0;
+    }
+    if (y + side > height) {
+      overflow.push(item);
+      return;
+    }
+    placed.push({
+      ...item,
+      rect: {
+        x,
+        y,
+        width: side,
+        height: side,
+      },
+    });
+    x += side + TREEMAP_GAP_PX;
+    rowHeight = Math.max(rowHeight, side);
+  });
+
+  return { placed, overflow };
 }
 
 function renderTreemap(rows) {
@@ -244,61 +240,73 @@ function renderTreemap(rows) {
   breadcrumb.textContent = "All Stocks";
 
   const items = buildTreemapRows(rows);
-  const minArea = 3200;
+  if (!items.length) {
+    return;
+  }
+
   let mainWidth = treemap.clientWidth;
-  let mainHeight = treemap.clientHeight;
+  const mainHeight = treemap.clientHeight;
   let microPaneWidth = 0;
-  let mainItems = items;
   let microItems = [];
+  let mainItems = items;
 
-  // Keep tiny positions visible and clickable in a dedicated lane instead of unreadable slivers.
-  if (items.length) {
-    const initialRects = squarify(items, 0, 0, treemap.clientWidth, treemap.clientHeight);
-    microItems = initialRects
-      .filter((item) => item.rect.width * item.rect.height < minArea)
-      .map((item) => ({ name: item.name, value: item.value, dailyPct: item.dailyPct }));
-    if (microItems.length) {
-      if (microItems.length === items.length) {
-        const largest = items.reduce((best, item) =>
-          item.value > best.value ? item : best
-        );
-        microItems = microItems.filter((item) => item.name !== largest.name);
-      }
+  const initialTargets = getTargetSquares(items, mainWidth, mainHeight);
+  microItems = initialTargets
+    .filter((item) => item.targetSide < TREEMAP_MICRO_THRESHOLD_PX)
+    .map((item) => ({ name: item.name, value: item.value, dailyPct: item.dailyPct }));
 
+  if (microItems.length > 0) {
+    const paneGap = 8;
+    const desiredPaneWidth =
+      treemap.clientWidth < 560
+        ? 120
+        : Math.min(240, Math.max(160, Math.round(treemap.clientWidth * 0.24)));
+    microPaneWidth = Math.min(
+      desiredPaneWidth,
+      Math.max(100, treemap.clientWidth - 220 - paneGap)
+    );
+    mainWidth = treemap.clientWidth - microPaneWidth - paneGap;
+    if (mainWidth < 180) {
+      microPaneWidth = 0;
+      mainWidth = treemap.clientWidth;
+      microItems = [];
+    } else {
       const microSet = new Set(microItems.map((item) => item.name));
       mainItems = items.filter((item) => !microSet.has(item.name));
-      const paneGap = 8;
-      const desiredPaneWidth =
-        treemap.clientWidth < 540
-          ? 110
-          : Math.min(240, Math.max(150, Math.round(treemap.clientWidth * 0.24)));
-      microPaneWidth = Math.min(
-        desiredPaneWidth,
-        Math.max(88, treemap.clientWidth - 180 - paneGap)
-      );
-      mainWidth = treemap.clientWidth - microPaneWidth - paneGap;
-      if (mainWidth < 150 || microPaneWidth < 72) {
-        microPaneWidth = 0;
-        mainWidth = treemap.clientWidth;
-        mainItems = items;
-        microItems = [];
+      if (!mainItems.length) {
+        mainItems = items.slice(0, 1);
+        microItems = items.slice(1);
       }
     }
   }
 
-  const rects = squarify(mainItems, 0, 0, mainWidth, mainHeight);
+  const mainTargets = getTargetSquares(mainItems, mainWidth, mainHeight);
+  let packed = packSquares(mainTargets, mainWidth, mainHeight, TREEMAP_MIN_MAIN_SIDE_PX);
+  if (!microPaneWidth && packed.overflow.length) {
+    [28, 20, 14, 10].some((side) => {
+      packed = packSquares(mainTargets, mainWidth, mainHeight, side);
+      return packed.overflow.length === 0;
+    });
+  }
+  microItems = microItems.concat(
+    packed.overflow.map((item) => ({
+      name: item.name,
+      value: item.value,
+      dailyPct: item.dailyPct,
+    }))
+  );
 
-  rects.forEach((item) => {
+  packed.placed.forEach((item) => {
     const block = document.createElement("div");
     const area = item.rect.width * item.rect.height;
     block.className = `treemap-block ${getSizeClass(area)} leaf`;
     block.style.left = `${item.rect.x}px`;
     block.style.top = `${item.rect.y}px`;
-    block.style.width = `${Math.max(0, item.rect.width)}px`;
-    block.style.height = `${Math.max(0, item.rect.height)}px`;
+    block.style.width = `${item.rect.width}px`;
+    block.style.height = `${item.rect.height}px`;
 
     const heat = getHeatColor(item.dailyPct || 0);
-    block.style.background = `linear-gradient(135deg, ${heat.strong}, ${heat.soft})`;
+    block.style.backgroundColor = heat.fill;
     block.style.borderColor = heat.border;
 
     const pct = fmtPercent.format(item.dailyPct || 0);
@@ -314,7 +322,7 @@ function renderTreemap(rows) {
     treemap.appendChild(block);
   });
 
-  if (microItems.length && microPaneWidth > 0) {
+  if (microPaneWidth > 0 && microItems.length > 0) {
     const pane = document.createElement("div");
     pane.className = "treemap-micro-pane";
     pane.style.left = `${mainWidth + 8}px`;
@@ -327,21 +335,22 @@ function renderTreemap(rows) {
 
     const list = document.createElement("div");
     list.className = "treemap-micro-list";
-    microItems.forEach((item) => {
-      const chip = document.createElement("button");
-      chip.type = "button";
-      chip.className = "treemap-micro-chip leaf";
-      const heat = getHeatColor(item.dailyPct || 0);
-      chip.style.background = `linear-gradient(135deg, ${heat.strong}, ${heat.soft})`;
-      chip.style.borderColor = heat.border;
-      chip.innerHTML = `
-        <span>${item.name}</span>
-        <span>${fmtPercent.format(item.dailyPct || 0)}</span>
-      `;
-      list.appendChild(chip);
-    });
+    microItems
+      .sort((a, b) => b.value - a.value)
+      .forEach((item) => {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "treemap-micro-chip leaf";
+        const heat = getHeatColor(item.dailyPct || 0);
+        chip.style.backgroundColor = heat.fill;
+        chip.style.borderColor = heat.border;
+        chip.innerHTML = `
+          <span>${item.name}</span>
+          <span>${fmtPercent.format(item.dailyPct || 0)}</span>
+        `;
+        list.appendChild(chip);
+      });
     pane.appendChild(list);
-
     treemap.appendChild(pane);
   }
 }
@@ -353,6 +362,7 @@ function scheduleLiveRender() {
   liveUpdateScheduled = true;
   requestAnimationFrame(() => {
     liveUpdateScheduled = false;
+    currentRows = liveRows;
     renderSummary(liveRows);
     renderTable(liveRows);
     renderTreemap(liveRows);
@@ -571,6 +581,7 @@ async function loadData() {
 
   rows.sort((a, b) => b.value - a.value);
 
+  currentRows = rows;
   renderSummary(rows);
   renderTable(rows);
   renderTreemap(rows);
@@ -600,6 +611,11 @@ document.getElementById("refreshBtn").addEventListener("click", () => {
   loadData().catch((err) => {
     alert(err.message);
   });
+});
+
+document.getElementById("holdingsSort").addEventListener("change", (event) => {
+  holdingsSortMode = event.target.value === "daily" ? "daily" : "value";
+  renderTable(currentRows);
 });
 
 loadData().catch((err) => {
