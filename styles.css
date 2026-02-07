@@ -170,6 +170,7 @@ h3 {
   line-height: 1.3;
   cursor: pointer;
   transition: box-shadow 0.15s ease, filter 0.2s ease;
+  overflow: hidden;
 }
 
 .treemap-block:hover {
@@ -181,6 +182,10 @@ h3 {
   font-weight: 600;
   font-size: 12px;
   letter-spacing: 0.02em;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .treemap-block .meta {
@@ -229,6 +234,15 @@ h3 {
   display: none;
 }
 
+.treemap-block.leaf {
+  cursor: default;
+}
+
+.treemap-block.leaf:hover {
+  box-shadow: none;
+  filter: none;
+}
+
 .treemap-micro-pane {
   position: absolute;
   top: 8px;
@@ -275,6 +289,14 @@ h3 {
 
 .treemap-micro-chip:hover {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.treemap-micro-chip.leaf {
+  cursor: default;
+}
+
+.treemap-micro-chip.leaf:hover {
+  box-shadow: none;
 }
 
 .subtle {

@@ -355,12 +355,7 @@ function bindTreemapNavigation(element, rows, level, itemName) {
     });
     return;
   }
-
-  element.addEventListener("click", () => {
-    treemapState.level = "sector";
-    treemapState.filterKey = null;
-    renderTreemap(rows, "sector");
-  });
+  // Leaf nodes should not force navigation back to top level.
 }
 
 function renderTreemap(rows, level = "sector", filterKey = null) {
@@ -377,7 +372,7 @@ function renderTreemap(rows, level = "sector", filterKey = null) {
   }
 
   const items = buildTreemapRows(rows, level, filterKey).filter((item) => item.value > 0);
-  const minArea = 3200;
+  const minArea = level === "sector" ? 5200 : level === "industry" ? 4200 : 3200;
   let mainWidth = treemap.clientWidth;
   let mainHeight = treemap.clientHeight;
   let microPaneWidth = 0;
@@ -385,7 +380,7 @@ function renderTreemap(rows, level = "sector", filterKey = null) {
   let microItems = [];
 
   // Keep tiny positions visible and clickable in a dedicated lane instead of unreadable slivers.
-  if (level === "ticker" && items.length) {
+  if (items.length) {
     const initialRects = squarify(items, 0, 0, treemap.clientWidth, treemap.clientHeight);
     microItems = initialRects
       .filter((item) => item.rect.width * item.rect.height < minArea)
@@ -424,7 +419,7 @@ function renderTreemap(rows, level = "sector", filterKey = null) {
   rects.forEach((item) => {
     const block = document.createElement("div");
     const area = item.rect.width * item.rect.height;
-    block.className = `treemap-block ${getSizeClass(area)}`;
+    block.className = `treemap-block ${getSizeClass(area)}${level === "ticker" ? " leaf" : ""}`;
     block.style.left = `${item.rect.x}px`;
     block.style.top = `${item.rect.y}px`;
     block.style.width = `${Math.max(0, item.rect.width)}px`;
@@ -465,7 +460,7 @@ function renderTreemap(rows, level = "sector", filterKey = null) {
     microItems.forEach((item) => {
       const chip = document.createElement("button");
       chip.type = "button";
-      chip.className = "treemap-micro-chip";
+      chip.className = `treemap-micro-chip${level === "ticker" ? " leaf" : ""}`;
       const heat = getHeatColor(item.dailyPct || 0);
       chip.style.background = `linear-gradient(135deg, ${heat.strong}, ${heat.soft})`;
       chip.style.borderColor = heat.border;
