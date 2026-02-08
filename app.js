@@ -75,6 +75,23 @@ function parseCSV(text) {
   });
 }
 
+function parseBooleanFlag(value) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number") {
+    return value !== 0;
+  }
+  const normalized = (value || "").toString().trim().toLowerCase();
+  return (
+    normalized === "true" ||
+    normalized === "yes" ||
+    normalized === "y" ||
+    normalized === "1" ||
+    normalized === "t"
+  );
+}
+
 function normalizeRow(row) {
   const normalized = {};
   Object.entries(row).forEach(([key, value]) => {
@@ -83,6 +100,7 @@ function normalizeRow(row) {
   });
 
   const ticker = normalized["ticker"] || normalized["ticket"] || "";
+  const tickerUpper = ticker.toString().trim().toUpperCase();
   const shares = Number(normalized["shares"] || 0);
   const price = Number(normalized["price (current)"] || normalized["price"] || 0);
   const dailyPctRaw = normalized["daily change %"] || normalized["daily %"] || "0";
@@ -103,6 +121,8 @@ function normalizeRow(row) {
     ? Number(monthPctRaw.toString().replace("%", "")) / 100
     : null;
   const yearPct = yearPctRaw ? Number(yearPctRaw.toString().replace("%", "")) / 100 : null;
+  const isCash = parseBooleanFlag(normalized["is cash"]) || tickerUpper === "CASH";
+  const isCrypto = !isCash && parseBooleanFlag(normalized["is crypto"]);
 
   return {
     ticker,
@@ -112,6 +132,8 @@ function normalizeRow(row) {
     value,
     monthPct,
     yearPct,
+    isCrypto,
+    isCash,
   };
 }
 
@@ -818,6 +840,32 @@ function buildTreemapRows(rows) {
     .sort((a, b) => b.value - a.value);
 }
 
+function renderAllocationExposure(rows) {
+  const cryptoLine = document.getElementById("allocationCryptoLine");
+  const cashLine = document.getElementById("allocationCashLine");
+  if (!cryptoLine || !cashLine) {
+    return;
+  }
+
+  const valued = rows.filter((row) => Number.isFinite(row.value) && row.value > 0);
+  const totalValue = valued.reduce((sum, row) => sum + row.value, 0);
+  const cryptoValue = valued
+    .filter((row) => row.isCrypto)
+    .reduce((sum, row) => sum + row.value, 0);
+  const cashValue = valued
+    .filter((row) => row.isCash)
+    .reduce((sum, row) => sum + row.value, 0);
+  const cryptoPct = totalValue > 0 ? cryptoValue / totalValue : 0;
+  const cashPct = totalValue > 0 ? cashValue / totalValue : 0;
+
+  cryptoLine.textContent = `Digital asset exposure: ${fmtPercent.format(
+    cryptoPct
+  )} of total portfolio value.`;
+  cashLine.textContent = `Cash allocation: ${fmtPercent.format(
+    cashPct
+  )} of total portfolio value.`;
+}
+
 function layoutTreemapRectangles(items, x, y, width, height) {
   if (!items.length || width <= 0 || height <= 0) {
     return [];
@@ -905,6 +953,7 @@ function layoutTreemapRectangles(items, x, y, width, height) {
 function renderTreemap(rows) {
   const treemap = document.getElementById("treemap");
   treemap.innerHTML = "";
+  renderAllocationExposure(rows);
   const breadcrumb = document.getElementById("treemapBreadcrumb");
   const items = buildTreemapRows(rows);
   const totalValue = items.reduce((sum, item) => sum + (item.value || 0), 0);

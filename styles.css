@@ -164,6 +164,12 @@ h3 {
     inset 0 40px 80px rgba(0, 0, 0, 0.35);
 }
 
+.allocation-exposure {
+  margin: 2px 0 12px;
+  display: grid;
+  gap: 4px;
+}
+
 .treemap-block {
   position: absolute;
   box-sizing: border-box;
