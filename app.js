@@ -329,6 +329,71 @@ function dedupeNewsItems(items) {
   return deduped;
 }
 
+function normalizeNewsKey(title) {
+  return (title || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function getFreshnessScore(publishedAt) {
+  if (!publishedAt || Number.isNaN(publishedAt.getTime())) {
+    return 2;
+  }
+  const ageHours = Math.max(0, (Date.now() - publishedAt.getTime()) / 3_600_000);
+  if (ageHours <= 1) return 35;
+  if (ageHours <= 3) return 30;
+  if (ageHours <= 8) return 24;
+  if (ageHours <= 24) return 16;
+  if (ageHours <= 48) return 9;
+  if (ageHours <= 96) return 4;
+  return 1;
+}
+
+function getPopularitySignalScore(item, duplicateCount) {
+  const title = (item.title || "").toLowerCase();
+  const summary = (item.summary || "").toLowerCase();
+  const text = `${title} ${summary}`;
+  let score = 0;
+
+  if (/(breaking|just in|developing|live|exclusive|alert)/.test(text)) {
+    score += 16;
+  }
+  if (/(fed|federal reserve|rate cut|rate hike|cpi|inflation|payroll|jobs report|treasury|yield|earnings|guidance|dow|s&p|nasdaq)/.test(text)) {
+    score += 12;
+  }
+  if (/(%|plunge|surge|rally|selloff|record high|record low)/.test(text)) {
+    score += 6;
+  }
+  if (duplicateCount > 1) {
+    score += Math.min(3, duplicateCount - 1) * 10;
+  }
+  return score;
+}
+
+function rankNewsItems(items) {
+  const deduped = dedupeNewsItems(items);
+  const keyCounts = new Map();
+  deduped.forEach((item) => {
+    const key = normalizeNewsKey(item.title);
+    keyCounts.set(key, (keyCounts.get(key) || 0) + 1);
+  });
+
+  return deduped
+    .map((item) => {
+      const key = normalizeNewsKey(item.title);
+      const duplicateCount = keyCounts.get(key) || 1;
+      const score = getFreshnessScore(item.publishedAt) + getPopularitySignalScore(item, duplicateCount);
+      return { ...item, score };
+    })
+    .sort((a, b) => {
+      if (b.score !== a.score) {
+        return b.score - a.score;
+      }
+      return (b.publishedAt?.getTime?.() || 0) - (a.publishedAt?.getTime?.() || 0);
+    });
+}
+
 function getSafeHttpUrl(value) {
   try {
     const url = new URL(value || "");
@@ -355,13 +420,12 @@ async function loadNewsDigest() {
     selectedSource === "all" ? Object.keys(NEWS_RSS_SOURCES) : [selectedSource];
   const groups = await Promise.all(sourceKeys.map((key) => fetchNewsFromSource(key)));
   const fetchedAny = groups.some((group) => group.length > 0);
-  const merged = dedupeNewsItems(groups.flat())
-    .filter((item) => item.title)
-    .sort((a, b) => (b.publishedAt?.getTime?.() || 0) - (a.publishedAt?.getTime?.() || 0));
-  const focused = filterNewsByFocus(merged, selectedFocus).slice(0, 12);
+  const merged = groups.flat().filter((item) => item.title);
+  const focused = filterNewsByFocus(merged, selectedFocus);
+  const ranked = rankNewsItems(focused).slice(0, 5);
 
-  currentNewsItems = focused;
-  renderNewsDigest(focused, {
+  currentNewsItems = ranked;
+  renderNewsDigest(ranked, {
     fetchedAny,
     selectedSource,
     selectedFocus,
@@ -394,7 +458,7 @@ function renderNewsDigest(items, context = {}) {
     return;
   }
 
-  meta.textContent = `Showing ${items.length} digested headlines`;
+  meta.textContent = `Showing top ${items.length} headlines ranked by popularity and freshness`;
 
   items.forEach((item) => {
     const card = document.createElement("article");
