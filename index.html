@@ -10,7 +10,7 @@
       href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Space+Grotesk:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20260207-6" />
+    <link rel="stylesheet" href="styles.css?v=20260207-8" />
     <link rel="icon" href="favicon.svg" type="image/svg+xml" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   </head>
@@ -72,6 +72,60 @@
 
       <section class="panel">
         <div class="panel-header">
+          <h3>Expert Advice</h3>
+          <div class="advice-controls">
+            <select id="adviceSource" class="sort-select">
+              <option value="built_in">Portfolio Pulse Analyst</option>
+              <option value="chatgpt">ChatGPT Prompt</option>
+              <option value="claude">Claude Prompt</option>
+              <option value="gemini">Gemini Prompt</option>
+              <option value="perplexity">Perplexity Prompt</option>
+            </select>
+            <select id="adviceMode" class="sort-select">
+              <option value="balanced">Balanced</option>
+              <option value="defensive">Defensive</option>
+              <option value="growth">Growth</option>
+              <option value="active">Active Trading</option>
+            </select>
+            <button id="adviceRefresh" class="ghost-btn small">Refresh Advice</button>
+          </div>
+        </div>
+        <p id="adviceMeta" class="subtle">Advice based on your holdings and loaded market news.</p>
+        <ul id="adviceList" class="advice-list"></ul>
+        <div id="advicePromptWrap" class="advice-prompt-wrap" style="display: none">
+          <div class="advice-prompt-header">
+            <a id="adviceExternalLink" href="#" target="_blank" rel="noopener noreferrer">Open AI Tool</a>
+            <button id="copyAdvicePrompt" class="ghost-btn small">Copy Prompt</button>
+          </div>
+          <textarea id="advicePrompt" class="advice-prompt" readonly></textarea>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h3>Market News Digest</h3>
+          <div class="advice-controls">
+            <select id="newsSource" class="sort-select">
+              <option value="all">All Sources</option>
+              <option value="cnbc">CNBC</option>
+              <option value="yahoo">Yahoo Finance</option>
+              <option value="reuters">Reuters</option>
+            </select>
+            <select id="newsFocus" class="sort-select">
+              <option value="all">All Market</option>
+              <option value="macro">Macro / Fed</option>
+              <option value="earnings">Earnings</option>
+              <option value="tech">Technology</option>
+            </select>
+            <button id="newsRefresh" class="ghost-btn small">Refresh News</button>
+          </div>
+        </div>
+        <p id="newsMeta" class="subtle">Loading latest headlines...</p>
+        <div id="newsList" class="news-list"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
           <div>
             <h3>Allocation Map</h3>
             <p class="subtle">Size = value (shares x price), color = daily %.</p>
@@ -126,6 +180,6 @@
       </section>
     </main>
 
-    <script src="app.js?v=20260207-7"></script>
+    <script src="app.js?v=20260207-8"></script>
   </body>
 </html>

@@ -31,6 +31,8 @@ let liveRows = [];
 let liveUpdateScheduled = false;
 let holdingsSortMode = "value";
 let currentRows = [];
+let currentNewsItems = [];
+let newsIsLoading = false;
 
 const TREEMAP_GAP_PX = 6;
 const TREEMAP_MIN_MAIN_SIDE_PX = 48;
@@ -38,6 +40,28 @@ const TREEMAP_MICRO_THRESHOLD_PX = 44;
 const DAILY_PL_STORAGE_KEY = "portfolio_pulse_daily_pl_v1";
 const DAILY_PL_HISTORY_LIMIT = 400;
 const DAILY_CALENDAR_START_ISO = "2026-02-01";
+
+const NEWS_RSS_SOURCES = {
+  cnbc: {
+    label: "CNBC",
+    url: "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+  },
+  yahoo: {
+    label: "Yahoo Finance",
+    url: "https://finance.yahoo.com/news/rssindex",
+  },
+  reuters: {
+    label: "Reuters",
+    url: "http://feeds.reuters.com/reuters/businessNews",
+  },
+};
+
+const ADVICE_EXTERNAL_LINKS = {
+  chatgpt: "https://chat.openai.com/",
+  claude: "https://claude.ai/",
+  gemini: "https://gemini.google.com/",
+  perplexity: "https://www.perplexity.ai/",
+};
 
 function parseCSV(text) {
   const lines = text.trim().split(/\r?\n/);
@@ -217,6 +241,299 @@ function formatDailyCellAmount(value) {
     .replace(/\.0+$/, "")
     .replace(/(\.\d*[1-9])0+$/, "$1");
   return `${value >= 0 ? "+" : "-"}$${compact}${suffix}`;
+}
+
+function stripHtml(value) {
+  return (value || "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function summarizeText(value, maxLength = 180) {
+  const text = stripHtml(value);
+  if (text.length <= maxLength) {
+    return text;
+  }
+  return `${text.slice(0, Math.max(0, maxLength - 1)).trim()}...`;
+}
+
+function classifyNewsFocus(item) {
+  const haystack = `${item.title} ${item.summary}`.toLowerCase();
+  if (/(fed|inflation|interest rate|rates|treasury|yield|jobs|payroll|cpi|pce)/.test(haystack)) {
+    return "macro";
+  }
+  if (/(earnings|guidance|quarter|q1|q2|q3|q4|revenue|eps)/.test(haystack)) {
+    return "earnings";
+  }
+  if (/(ai|chip|semiconductor|software|cloud|apple|microsoft|nvidia|google|amazon|meta|tesla)/.test(haystack)) {
+    return "tech";
+  }
+  return "all";
+}
+
+function buildRss2JsonUrl(feedUrl) {
+  return `https://api.rss2json.com/v1/api.json?count=15&rss_url=${encodeURIComponent(feedUrl)}`;
+}
+
+async function fetchNewsFromSource(sourceKey) {
+  const source = NEWS_RSS_SOURCES[sourceKey];
+  if (!source) {
+    return [];
+  }
+  try {
+    const response = await fetch(buildRss2JsonUrl(source.url));
+    if (!response.ok) {
+      return [];
+    }
+    const data = await response.json();
+    const items = Array.isArray(data?.items) ? data.items : [];
+    return items.map((item) => {
+      const publishedAt = item?.pubDate ? new Date(item.pubDate) : null;
+      return {
+        source: source.label,
+        title: stripHtml(item?.title || ""),
+        summary: summarizeText(item?.description || item?.content || ""),
+        link: item?.link || "",
+        publishedAt: publishedAt && !Number.isNaN(publishedAt.getTime()) ? publishedAt : null,
+      };
+    });
+  } catch (err) {
+    return [];
+  }
+}
+
+function filterNewsByFocus(items, focus) {
+  if (focus === "all") {
+    return items;
+  }
+  return items.filter((item) => classifyNewsFocus(item) === focus);
+}
+
+function dedupeNewsItems(items) {
+  const seen = new Set();
+  const deduped = [];
+  items.forEach((item) => {
+    const key = `${item.title.toLowerCase()}|${item.source}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    deduped.push(item);
+  });
+  return deduped;
+}
+
+function getSafeHttpUrl(value) {
+  try {
+    const url = new URL(value || "");
+    if (url.protocol === "http:" || url.protocol === "https:") {
+      return url.toString();
+    }
+  } catch (err) {
+    return "";
+  }
+  return "";
+}
+
+async function loadNewsDigest() {
+  const sourceSelect = document.getElementById("newsSource");
+  const focusSelect = document.getElementById("newsFocus");
+  const meta = document.getElementById("newsMeta");
+  const selectedSource = sourceSelect?.value || "all";
+  const selectedFocus = focusSelect?.value || "all";
+
+  newsIsLoading = true;
+  meta.textContent = "Loading latest headlines...";
+
+  const sourceKeys =
+    selectedSource === "all" ? Object.keys(NEWS_RSS_SOURCES) : [selectedSource];
+  const groups = await Promise.all(sourceKeys.map((key) => fetchNewsFromSource(key)));
+  const merged = dedupeNewsItems(groups.flat())
+    .filter((item) => item.title)
+    .sort((a, b) => (b.publishedAt?.getTime?.() || 0) - (a.publishedAt?.getTime?.() || 0));
+  const focused = filterNewsByFocus(merged, selectedFocus).slice(0, 12);
+
+  currentNewsItems = focused;
+  renderNewsDigest(focused);
+  renderExpertAdvice(currentRows, currentNewsItems);
+  newsIsLoading = false;
+}
+
+function renderNewsDigest(items) {
+  const list = document.getElementById("newsList");
+  const meta = document.getElementById("newsMeta");
+  list.innerHTML = "";
+
+  if (!items.length) {
+    meta.textContent = "No headlines available for this filter right now.";
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent = "Try a different source or focus.";
+    list.appendChild(empty);
+    return;
+  }
+
+  meta.textContent = `Showing ${items.length} digested headlines`;
+
+  items.forEach((item) => {
+    const card = document.createElement("article");
+    card.className = "news-card";
+
+    const metaLine = document.createElement("div");
+    metaLine.className = "news-meta";
+    const publishedLabel = item.publishedAt
+      ? item.publishedAt.toLocaleString("en-US", {
+          month: "short",
+          day: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+        })
+      : "Recent";
+    metaLine.textContent = `${item.source} • ${publishedLabel}`;
+
+    const titleEl = document.createElement("h4");
+    titleEl.className = "news-title";
+    const safeUrl = getSafeHttpUrl(item.link);
+    if (safeUrl) {
+      const anchor = document.createElement("a");
+      anchor.href = safeUrl;
+      anchor.target = "_blank";
+      anchor.rel = "noopener noreferrer";
+      anchor.textContent = item.title;
+      titleEl.appendChild(anchor);
+    } else {
+      titleEl.textContent = item.title;
+    }
+
+    const summaryEl = document.createElement("p");
+    summaryEl.className = "news-summary";
+    summaryEl.textContent = item.summary || "No summary available.";
+
+    card.appendChild(metaLine);
+    card.appendChild(titleEl);
+    card.appendChild(summaryEl);
+    list.appendChild(card);
+  });
+}
+
+function buildAdvicePrompt(rows, newsItems, mode) {
+  const top = getSortedRows(rows).slice(0, 8);
+  const holdingsLine = top
+    .map((row) => `${row.ticker}: shares=${row.shares}, price=${row.price}, value=${row.value.toFixed(2)}, dailyPct=${(row.dailyPct * 100).toFixed(2)}%`)
+    .join("\n");
+  const newsLine = newsItems
+    .slice(0, 8)
+    .map((item) => `- [${item.source}] ${item.title}`)
+    .join("\n");
+  return [
+    "You are a professional equity portfolio advisor.",
+    `Investor mode: ${mode}.`,
+    "Analyze this portfolio and recent market headlines.",
+    "Give concise, actionable advice with: 1) risks, 2) opportunities, 3) concrete next actions.",
+    "",
+    "Holdings:",
+    holdingsLine || "No holdings loaded.",
+    "",
+    "Recent headlines:",
+    newsLine || "No headlines loaded.",
+  ].join("\n");
+}
+
+function tickerMentionsFromNews(newsItems, tickers) {
+  const mentions = [];
+  newsItems.forEach((item) => {
+    const upper = item.title.toUpperCase();
+    tickers.forEach((ticker) => {
+      const clean = ticker.toUpperCase();
+      const safe = clean.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      if (clean && new RegExp(`\\b${safe}\\b`).test(upper)) {
+        mentions.push({ ticker: clean, title: item.title, source: item.source });
+      }
+    });
+  });
+  return mentions.slice(0, 3);
+}
+
+function generateBuiltInAdvice(rows, newsItems, mode) {
+  const sorted = getSortedRows(rows);
+  if (!sorted.length) {
+    return ["Load your holdings to generate portfolio-specific advice."];
+  }
+  const total = sorted.reduce((sum, row) => sum + row.value, 0);
+  const top = sorted.slice(0, 3);
+  const topWeight = total ? top.reduce((sum, row) => sum + row.value, 0) / total : 0;
+  const top1Weight = total && sorted[0] ? sorted[0].value / total : 0;
+  const tickers = sorted.map((row) => row.ticker);
+  const mentions = tickerMentionsFromNews(newsItems, tickers);
+  const lines = [];
+
+  if (top1Weight > 0.35) {
+    lines.push(`Concentration risk is high: ${sorted[0].ticker} is ${fmtPercent.format(top1Weight)} of your portfolio. Consider trimming or hedging to reduce single-name shock risk.`);
+  } else if (topWeight > 0.65) {
+    lines.push(`Top-3 concentration is ${fmtPercent.format(topWeight)}. Add 1-2 lower-correlation positions or increase cash to improve downside resilience.`);
+  } else {
+    lines.push("Position sizing looks reasonably balanced. Keep reviewing weights weekly so winners do not silently over-concentrate.");
+  }
+
+  const worst = sorted.reduce((acc, row) => (row.dailyPct < acc.dailyPct ? row : acc), sorted[0] || null);
+  const best = sorted.reduce((acc, row) => (row.dailyPct > acc.dailyPct ? row : acc), sorted[0] || null);
+  if (best && worst) {
+    lines.push(`Today's dispersion is wide: strongest is ${best.ticker} (${fmtPercent.format(best.dailyPct)}), weakest is ${worst.ticker} (${fmtPercent.format(worst.dailyPct)}). Re-check thesis before reacting to one-day moves.`);
+  }
+
+  if (mentions.length) {
+    const mentionText = mentions.map((m) => `${m.ticker} (${m.source})`).join(", ");
+    lines.push(`Recent headlines directly touching your holdings: ${mentionText}. Read those first before making allocation changes.`);
+  } else {
+    lines.push("Recent headlines are mostly macro-level; prioritize position sizing and risk controls over aggressive turnover.");
+  }
+
+  if (mode === "defensive") {
+    lines.push("Defensive mode: keep some dry powder, reduce leverage, and focus on balance-sheet quality and stable earnings visibility.");
+  } else if (mode === "growth") {
+    lines.push("Growth mode: add only on quality pullbacks, and set max position limits to avoid concentration creep.");
+  } else if (mode === "active") {
+    lines.push("Active mode: predefine invalidation levels and take-profit rules before entering trades to avoid emotional execution.");
+  } else {
+    lines.push("Balanced mode: maintain core positions, rebalance on outsized moves, and let news confirm or challenge your thesis.");
+  }
+
+  return lines.slice(0, 5);
+}
+
+function renderExpertAdvice(rows, newsItems) {
+  const source = document.getElementById("adviceSource").value;
+  const mode = document.getElementById("adviceMode").value;
+  const meta = document.getElementById("adviceMeta");
+  const list = document.getElementById("adviceList");
+  const promptWrap = document.getElementById("advicePromptWrap");
+  const promptArea = document.getElementById("advicePrompt");
+  const externalLink = document.getElementById("adviceExternalLink");
+
+  const lines = generateBuiltInAdvice(rows, newsItems, mode);
+  list.innerHTML = "";
+  lines.forEach((line) => {
+    const li = document.createElement("li");
+    li.textContent = line;
+    list.appendChild(li);
+  });
+
+  if (source === "built_in") {
+    promptWrap.style.display = "none";
+    meta.textContent = newsIsLoading
+      ? "Advice based on holdings. News is still loading..."
+      : "Advice based on your holdings and loaded market news.";
+    return;
+  }
+
+  const prompt = buildAdvicePrompt(rows, newsItems, mode);
+  const external = ADVICE_EXTERNAL_LINKS[source] || "#";
+  externalLink.href = external;
+  externalLink.textContent = `Open ${source === "chatgpt" ? "ChatGPT" : source[0].toUpperCase() + source.slice(1)}`;
+  promptArea.value = prompt;
+  promptWrap.style.display = "block";
+  meta.textContent = "Built-in advice plus exportable prompt for your selected AI tool.";
 }
 
 function getHeatColor(pct) {
@@ -486,6 +803,7 @@ function scheduleLiveRender() {
     renderDailyGainLoss(liveRows);
     renderTable(liveRows);
     renderTreemap(liveRows);
+    renderExpertAdvice(liveRows, currentNewsItems);
   });
 }
 
@@ -816,6 +1134,7 @@ async function loadData() {
   renderDailyGainLoss(rows);
   renderTable(rows);
   renderTreemap(rows);
+  renderExpertAdvice(rows, currentNewsItems);
   const hasSheetPrices = rows.some((row) => row.price > 0);
   if (!hasSheetPrices) {
     startLivePrices(rows);
@@ -836,6 +1155,7 @@ async function loadData() {
     }
   }
   renderHistory(historyData);
+  loadNewsDigest();
 }
 
 document.getElementById("refreshBtn").addEventListener("click", () => {
@@ -854,6 +1174,43 @@ document.getElementById("holdingsSortToggle").addEventListener("click", (event) 
     pill.classList.toggle("active", pill === button);
   });
   renderTable(currentRows);
+});
+
+document.getElementById("newsRefresh").addEventListener("click", () => {
+  loadNewsDigest();
+});
+
+document.getElementById("newsSource").addEventListener("change", () => {
+  loadNewsDigest();
+});
+
+document.getElementById("newsFocus").addEventListener("change", () => {
+  loadNewsDigest();
+});
+
+document.getElementById("adviceRefresh").addEventListener("click", () => {
+  renderExpertAdvice(currentRows, currentNewsItems);
+});
+
+document.getElementById("adviceSource").addEventListener("change", () => {
+  renderExpertAdvice(currentRows, currentNewsItems);
+});
+
+document.getElementById("adviceMode").addEventListener("change", () => {
+  renderExpertAdvice(currentRows, currentNewsItems);
+});
+
+document.getElementById("copyAdvicePrompt").addEventListener("click", async () => {
+  const prompt = document.getElementById("advicePrompt").value;
+  if (!prompt) {
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(prompt);
+    document.getElementById("adviceMeta").textContent = "Prompt copied to clipboard.";
+  } catch (err) {
+    document.getElementById("adviceMeta").textContent = "Could not copy prompt. Please copy manually.";
+  }
 });
 
 loadData().catch((err) => {

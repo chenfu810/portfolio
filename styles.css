@@ -70,6 +70,11 @@ h3 {
   color: var(--accent);
 }
 
+.ghost-btn.small {
+  padding: 7px 12px;
+  font-size: 12px;
+}
+
 .hero {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
@@ -434,6 +439,110 @@ h3 {
   color: #e7eefc;
 }
 
+.advice-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sort-select {
+  background: #0f1522;
+  color: #eaf1ff;
+  border: 1px solid #2a3449;
+  border-radius: 10px;
+  padding: 7px 10px;
+  font-size: 12px;
+}
+
+.advice-list {
+  margin-left: 20px;
+  display: grid;
+  gap: 8px;
+}
+
+.advice-list li {
+  color: #dce7fd;
+  line-height: 1.45;
+}
+
+.advice-prompt-wrap {
+  margin-top: 14px;
+  border: 1px solid #2a3449;
+  background: #101726;
+  border-radius: 12px;
+  padding: 10px;
+}
+
+.advice-prompt-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.advice-prompt-header a {
+  color: #8fd7ff;
+  text-decoration: none;
+  font-size: 12px;
+}
+
+.advice-prompt-header a:hover {
+  text-decoration: underline;
+}
+
+.advice-prompt {
+  width: 100%;
+  min-height: 150px;
+  background: #0d1320;
+  color: #dce7fd;
+  border: 1px solid #2a3449;
+  border-radius: 10px;
+  padding: 10px;
+  resize: vertical;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 12px;
+}
+
+.news-list {
+  display: grid;
+  gap: 10px;
+}
+
+.news-card {
+  background: #101726;
+  border: 1px solid #263145;
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.news-meta {
+  color: #8ea1c2;
+  font-size: 11px;
+  margin-bottom: 6px;
+}
+
+.news-title {
+  font-size: 15px;
+  margin-bottom: 7px;
+  line-height: 1.35;
+}
+
+.news-title a {
+  color: #edf3ff;
+  text-decoration: none;
+}
+
+.news-title a:hover {
+  color: #9ad8ff;
+}
+
+.news-summary {
+  color: #c5d3ed;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
 .table-wrap {
   overflow-x: auto;
 }
@@ -543,5 +652,19 @@ tbody tr:hover {
     flex-direction: column;
     align-items: flex-start;
     gap: 16px;
+  }
+
+  .panel-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .advice-controls {
+    width: 100%;
+  }
+
+  .sort-select {
+    flex: 1;
+    min-width: 130px;
   }
 }
