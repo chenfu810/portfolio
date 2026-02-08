@@ -482,6 +482,17 @@ tbody tr:hover {
   background: rgba(255, 255, 255, 0.02);
 }
 
+.ticker-link {
+  color: #8fd7ff;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.ticker-link:hover {
+  color: #c1ecff;
+  text-decoration: underline;
+}
+
 .mono {
   font-family: "Space Grotesk", sans-serif;
   font-weight: 600;

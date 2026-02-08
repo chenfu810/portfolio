@@ -261,16 +261,29 @@ function getSortedRows(rows) {
   return sorted;
 }
 
+function getRobinhoodStockUrl(ticker) {
+  const symbol = (ticker || "").toString().trim().toUpperCase();
+  if (!symbol) {
+    return "";
+  }
+  return `https://robinhood.com/us/en/stocks/${encodeURIComponent(symbol)}/`;
+}
+
 function renderTable(rows) {
   const tbody = document.getElementById("holdingsTable");
   tbody.innerHTML = "";
   const sortedRows = getSortedRows(rows);
   sortedRows.forEach((row) => {
     const tr = document.createElement("tr");
+    const ticker = (row.ticker || "").toString().trim().toUpperCase();
+    const tickerUrl = getRobinhoodStockUrl(ticker);
+    const tickerCell = tickerUrl
+      ? `<a class="ticker-link" href="${tickerUrl}" target="_blank" rel="noopener noreferrer">${ticker}</a>`
+      : ticker;
     const priceDisplay = row.price ? fmtCurrency.format(row.price) : "—";
     const valueDisplay = row.value ? fmtCurrency.format(row.value) : "—";
     tr.innerHTML = `
-      <td>${row.ticker}</td>
+      <td>${tickerCell}</td>
       <td>${row.shares.toLocaleString()}</td>
       <td>${priceDisplay}</td>
       <td class="${row.dailyPct >= 0 ? "pos" : "neg"}">
