@@ -251,7 +251,29 @@ h3 {
 .allocation-exposure {
   margin: 2px 0 12px;
   display: grid;
-  gap: 4px;
+  gap: 6px;
+}
+
+.allocation-line {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.allocation-line-crypto {
+  border-color: rgba(105, 232, 207, 0.38);
+  background: linear-gradient(135deg, rgba(105, 232, 207, 0.14), rgba(105, 232, 207, 0.04));
+  color: #c9f8ea;
+}
+
+.allocation-line-cash {
+  border-color: rgba(121, 195, 255, 0.34);
+  background: linear-gradient(135deg, rgba(121, 195, 255, 0.14), rgba(121, 195, 255, 0.04));
+  color: #d6eefe;
 }
 
 .treemap-block {
