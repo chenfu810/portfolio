@@ -137,6 +137,15 @@ function formatHistoryLabel(label) {
   return label;
 }
 
+function formatSignedPercent(value) {
+  const num = Number(value);
+  const safe = Number.isFinite(num) ? num : 0;
+  if (safe > 0) {
+    return `+${fmtPercent.format(safe)}`;
+  }
+  return fmtPercent.format(safe);
+}
+
 function toIsoLocal(date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -793,6 +802,7 @@ function renderTreemap(rows) {
   treemap.innerHTML = "";
   const breadcrumb = document.getElementById("treemapBreadcrumb");
   const items = buildTreemapRows(rows);
+  const totalValue = items.reduce((sum, item) => sum + (item.value || 0), 0);
   breadcrumb.textContent = `All Stocks (${items.length})`;
 
   if (!items.length) {
@@ -818,13 +828,15 @@ function renderTreemap(rows) {
       block.style.backgroundColor = heat.fill;
       block.style.borderColor = heat.border;
 
-      const pct = fmtPercent.format(item.dailyPct || 0);
+      const pct = formatSignedPercent(item.dailyPct || 0);
       const value = fmtCurrency.format(item.value || 0);
+      const weight = totalValue > 0 ? (item.value || 0) / totalValue : 0;
       block.innerHTML = `
         <div>
           <div class="title">${item.name}</div>
           <div class="meta pct">${pct}</div>
           <div class="meta value">${value}</div>
+          <div class="meta weight">${fmtPercent.format(weight)} of total</div>
         </div>
       `;
 
