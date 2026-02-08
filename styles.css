@@ -166,6 +166,7 @@ h3 {
 
 .treemap-block {
   position: absolute;
+  box-sizing: border-box;
   border: 1px solid #1f2a3f;
   display: flex;
   align-items: flex-start;

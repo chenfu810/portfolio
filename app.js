@@ -708,13 +708,47 @@ function layoutTreemapRectangles(items, x, y, width, height) {
   if (!items.length || width <= 0 || height <= 0) {
     return [];
   }
+  const ix = Math.round(x);
+  const iy = Math.round(y);
+  const iw = Math.round(width);
+  const ih = Math.round(height);
+  if (iw <= 0 || ih <= 0) {
+    return [];
+  }
   if (items.length === 1) {
-    return [{ ...items[0], rect: { x, y, width, height } }];
+    return [{ ...items[0], rect: { x: ix, y: iy, width: iw, height: ih } }];
   }
 
   const total = items.reduce((sum, item) => sum + item.value, 0);
   if (!total) {
     return [];
+  }
+
+  function layoutLinear(list, lx, ly, lw, lh, splitByWidth) {
+    const out = [];
+    const subtotal = list.reduce((sum, item) => sum + item.value, 0);
+    if (!subtotal || lw <= 0 || lh <= 0) {
+      return out;
+    }
+    let prev = 0;
+    const span = splitByWidth ? lw : lh;
+    list.forEach((item, idx) => {
+      const next =
+        idx === list.length - 1
+          ? span
+          : Math.round(((prev + item.value) / subtotal) * span);
+      const size = Math.max(0, next - prev);
+      const rect = splitByWidth
+        ? { x: lx + prev, y: ly, width: size, height: lh }
+        : { x: lx, y: ly + prev, width: lw, height: size };
+      out.push({ ...item, rect });
+      prev = next;
+    });
+    return out;
+  }
+
+  if (iw <= 1 || ih <= 1) {
+    return layoutLinear(items, ix, iy, iw, ih, iw >= ih);
   }
 
   let running = 0;
@@ -731,32 +765,26 @@ function layoutTreemapRectangles(items, x, y, width, height) {
   const firstTotal = first.reduce((sum, item) => sum + item.value, 0);
   const ratio = firstTotal / total;
 
-  if (width >= height) {
-    if (width <= 2) {
-      const h1 = height * ratio;
-      return [
-        ...layoutTreemapRectangles(first, x, y, width, h1),
-        ...layoutTreemapRectangles(second, x, y + h1, width, height - h1),
-      ];
+  if (iw >= ih) {
+    const raw = Math.round(iw * ratio);
+    const w1 = Math.max(1, Math.min(iw - 1, raw));
+    if (w1 <= 0 || iw - w1 <= 0) {
+      return layoutLinear(items, ix, iy, iw, ih, true);
     }
-    const w1 = Math.max(1, Math.min(width - 1, width * ratio));
     return [
-      ...layoutTreemapRectangles(first, x, y, w1, height),
-      ...layoutTreemapRectangles(second, x + w1, y, width - w1, height),
+      ...layoutTreemapRectangles(first, ix, iy, w1, ih),
+      ...layoutTreemapRectangles(second, ix + w1, iy, iw - w1, ih),
     ];
   }
 
-  if (height <= 2) {
-    const w1 = width * ratio;
-    return [
-      ...layoutTreemapRectangles(first, x, y, w1, height),
-      ...layoutTreemapRectangles(second, x + w1, y, width - w1, height),
-    ];
+  const raw = Math.round(ih * ratio);
+  const h1 = Math.max(1, Math.min(ih - 1, raw));
+  if (h1 <= 0 || ih - h1 <= 0) {
+    return layoutLinear(items, ix, iy, iw, ih, false);
   }
-  const h1 = Math.max(1, Math.min(height - 1, height * ratio));
   return [
-    ...layoutTreemapRectangles(first, x, y, width, h1),
-    ...layoutTreemapRectangles(second, x, y + h1, width, height - h1),
+    ...layoutTreemapRectangles(first, ix, iy, iw, h1),
+    ...layoutTreemapRectangles(second, ix, iy + h1, iw, ih - h1),
   ];
 }
 
@@ -771,39 +799,37 @@ function renderTreemap(rows) {
     return;
   }
 
-  const rects = layoutTreemapRectangles(
-    items,
-    0,
-    0,
-    treemap.clientWidth,
-    treemap.clientHeight
-  );
+  const width = Math.max(1, Math.round(treemap.clientWidth));
+  const height = Math.max(1, Math.round(treemap.clientHeight));
+  const rects = layoutTreemapRectangles(items, 0, 0, width, height);
 
-  rects.forEach((item) => {
-    const block = document.createElement("div");
-    const area = item.rect.width * item.rect.height;
-    block.className = `treemap-block ${getSizeClass(area)} leaf`;
-    block.style.left = `${item.rect.x}px`;
-    block.style.top = `${item.rect.y}px`;
-    block.style.width = `${item.rect.width}px`;
-    block.style.height = `${item.rect.height}px`;
+  rects
+    .filter((item) => item.rect.width > 0 && item.rect.height > 0)
+    .forEach((item) => {
+      const block = document.createElement("div");
+      const area = item.rect.width * item.rect.height;
+      block.className = `treemap-block ${getSizeClass(area)} leaf`;
+      block.style.left = `${item.rect.x}px`;
+      block.style.top = `${item.rect.y}px`;
+      block.style.width = `${item.rect.width}px`;
+      block.style.height = `${item.rect.height}px`;
 
-    const heat = getHeatColor(item.dailyPct || 0);
-    block.style.backgroundColor = heat.fill;
-    block.style.borderColor = heat.border;
+      const heat = getHeatColor(item.dailyPct || 0);
+      block.style.backgroundColor = heat.fill;
+      block.style.borderColor = heat.border;
 
-    const pct = fmtPercent.format(item.dailyPct || 0);
-    const value = fmtCurrency.format(item.value || 0);
-    block.innerHTML = `
-      <div>
-        <div class="title">${item.name}</div>
-        <div class="meta pct">${pct}</div>
-        <div class="meta value">${value}</div>
-      </div>
-    `;
+      const pct = fmtPercent.format(item.dailyPct || 0);
+      const value = fmtCurrency.format(item.value || 0);
+      block.innerHTML = `
+        <div>
+          <div class="title">${item.name}</div>
+          <div class="meta pct">${pct}</div>
+          <div class="meta value">${value}</div>
+        </div>
+      `;
 
-    treemap.appendChild(block);
-  });
+      treemap.appendChild(block);
+    });
 }
 
 function scheduleLiveRender() {
