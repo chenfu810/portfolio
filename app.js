@@ -27,6 +27,7 @@ const fmtPercent = new Intl.NumberFormat("en-US", {
 });
 
 let historyChart;
+let benchmarkCurveChart;
 let liveRows = [];
 let liveUpdateScheduled = false;
 let holdingsSortMode = "dailyValueDesc";
@@ -51,6 +52,7 @@ let latestPortfolioReturns = {
   ytd: null,
 };
 let latestBenchmarkReturns = {};
+let latestBenchmarkSeries = {};
 let benchmarkLastUpdatedAt = null;
 
 const NEWS_RSS_SOURCES = {
@@ -586,6 +588,7 @@ function renderBenchmarkContext() {
   }
   if (!benchmarkLastUpdatedAt) {
     meta.textContent = "Loading SPY and QQQ context...";
+    renderBenchmarkCurve();
     return;
   }
   const updated = benchmarkLastUpdatedAt.toLocaleTimeString("en-US", {
@@ -593,6 +596,7 @@ function renderBenchmarkContext() {
     minute: "2-digit",
   });
   meta.textContent = `SPY/QQQ via Stooq (EOD close). Updated ${updated}.`;
+  renderBenchmarkCurve();
 }
 
 async function refreshBenchmarkContext() {
@@ -603,16 +607,167 @@ async function refreshBenchmarkContext() {
   const results = await Promise.all(
     BENCHMARK_SYMBOLS.map(async (symbol) => {
       const series = await fetchBenchmarkSeries(symbol);
-      return [symbol, computeBenchmarkReturns(series), series.length > 0];
+      return [symbol, computeBenchmarkReturns(series), series.length > 0, series];
     })
   );
   latestBenchmarkReturns = Object.fromEntries(results.map(([symbol, returns]) => [symbol, returns]));
+  latestBenchmarkSeries = Object.fromEntries(results.map(([symbol, , , series]) => [symbol, series]));
   const hasAnyData = results.some(([, , hasData]) => hasData);
   benchmarkLastUpdatedAt = hasAnyData ? new Date() : null;
   renderBenchmarkContext();
   if (!hasAnyData && meta) {
     meta.textContent = "Benchmark feed unavailable. Click Refresh to retry.";
   }
+}
+
+function getSnapshotValueOnOrBefore(snapshots, targetMs) {
+  for (let idx = snapshots.length - 1; idx >= 0; idx -= 1) {
+    const parsed = parseIsoDate(snapshots[idx].date);
+    if (!parsed) {
+      continue;
+    }
+    if (parsed.getTime() <= targetMs) {
+      return snapshots[idx].value;
+    }
+  }
+  return null;
+}
+
+function buildBenchmarkCurveData() {
+  const snapshots = loadStoredValueSnapshots();
+  const spySeries = latestBenchmarkSeries.SPY || [];
+  const qqqSeries = latestBenchmarkSeries.QQQ || [];
+  if (!snapshots.length || !spySeries.length || !qqqSeries.length) {
+    return null;
+  }
+
+  const snapshotStart = parseIsoDate(snapshots[0].date);
+  if (!snapshotStart) {
+    return null;
+  }
+  const now = Date.now();
+  const ninetyDaysAgo = now - 90 * 24 * 60 * 60 * 1000;
+  const startMs = Math.max(snapshotStart.getTime(), spySeries[0].ms, qqqSeries[0].ms, ninetyDaysAgo);
+
+  const dateSet = new Set();
+  spySeries.forEach((point) => {
+    if (point.ms >= startMs) {
+      dateSet.add(point.ms);
+    }
+  });
+  qqqSeries.forEach((point) => {
+    if (point.ms >= startMs) {
+      dateSet.add(point.ms);
+    }
+  });
+  const dates = Array.from(dateSet).sort((a, b) => a - b);
+  const points = dates
+    .map((ms) => {
+      const pVal = getSnapshotValueOnOrBefore(snapshots, ms);
+      const spyVal = getSeriesPointOnOrBefore(spySeries, ms)?.close ?? null;
+      const qqqVal = getSeriesPointOnOrBefore(qqqSeries, ms)?.close ?? null;
+      if (!Number.isFinite(pVal) || !Number.isFinite(spyVal) || !Number.isFinite(qqqVal)) {
+        return null;
+      }
+      return { ms, pVal, spyVal, qqqVal };
+    })
+    .filter(Boolean);
+  if (points.length < 8) {
+    return null;
+  }
+
+  const sliced = points.slice(-90);
+  const base = sliced[0];
+  return {
+    labels: sliced.map((point) =>
+      new Date(point.ms).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+    ),
+    portfolio: sliced.map((point) => (point.pVal / base.pVal) * 100),
+    spy: sliced.map((point) => (point.spyVal / base.spyVal) * 100),
+    qqq: sliced.map((point) => (point.qqqVal / base.qqqVal) * 100),
+  };
+}
+
+function renderBenchmarkCurve() {
+  const canvas = document.getElementById("benchmarkCurve");
+  const empty = document.getElementById("benchmarkCurveEmpty");
+  if (!canvas || !empty) {
+    return;
+  }
+
+  const curve = buildBenchmarkCurveData();
+  if (!curve) {
+    if (benchmarkCurveChart) {
+      benchmarkCurveChart.destroy();
+      benchmarkCurveChart = null;
+    }
+    canvas.style.display = "none";
+    empty.style.display = "block";
+    return;
+  }
+
+  canvas.style.display = "block";
+  empty.style.display = "none";
+  if (benchmarkCurveChart) {
+    benchmarkCurveChart.destroy();
+  }
+  benchmarkCurveChart = new Chart(canvas, {
+    type: "line",
+    data: {
+      labels: curve.labels,
+      datasets: [
+        {
+          label: "Portfolio",
+          data: curve.portfolio,
+          borderColor: "#8df0d2",
+          backgroundColor: "rgba(141, 240, 210, 0.14)",
+          borderWidth: 2.4,
+          pointRadius: 0,
+          tension: 0.28,
+        },
+        {
+          label: "SPY",
+          data: curve.spy,
+          borderColor: "#7fb8ff",
+          borderWidth: 2,
+          pointRadius: 0,
+          tension: 0.25,
+        },
+        {
+          label: "QQQ",
+          data: curve.qqq,
+          borderColor: "#ffc06e",
+          borderWidth: 2,
+          pointRadius: 0,
+          tension: 0.25,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          labels: { color: "#d9e5fc" },
+        },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(2)}`,
+          },
+        },
+      },
+      scales: {
+        x: {
+          ticks: { color: "#a7b6d5", maxRotation: 0, autoSkip: true, maxTicksLimit: 8 },
+          grid: { color: "rgba(255,255,255,0.05)" },
+        },
+        y: {
+          ticks: { color: "#a7b6d5", callback: (val) => `${Number(val).toFixed(0)}` },
+          grid: { color: "rgba(255,255,255,0.05)" },
+        },
+      },
+    },
+  });
 }
 
 async function fetchNewsFromSource(sourceKey) {
@@ -1152,39 +1307,6 @@ function setSnapshotMetric(id, value, type = "neutral") {
   }
 }
 
-function renderSnapshotStrip(rows) {
-  const totalValue = rows.reduce((sum, row) => sum + row.value, 0);
-  const dailyChangeValue = rows.reduce((sum, row) => sum + row.value * row.dailyPct, 0);
-  const dailyChangePct = totalValue ? dailyChangeValue / totalValue : 0;
-  const snapshots = upsertTodayValueSnapshot(totalValue);
-  latestPortfolioReturns = computePortfolioReturns(totalValue, dailyChangePct, snapshots);
-  const exposure = getPortfolioExposure(rows);
-
-  setSnapshotMetric("snapshotTotalValue", fmtCurrency.format(totalValue));
-  setSnapshotMetric(
-    "snapshotTodayPL",
-    `${formatSignedCurrency(dailyChangeValue)} (${formatSignedPercent(dailyChangePct)})`,
-    dailyChangeValue > 0 ? "pos" : dailyChangeValue < 0 ? "neg" : "neutral"
-  );
-  setSnapshotMetric(
-    "snapshot1W",
-    Number.isFinite(latestPortfolioReturns.w1) ? formatSignedPercent(latestPortfolioReturns.w1) : "—",
-    latestPortfolioReturns.w1 > 0 ? "pos" : latestPortfolioReturns.w1 < 0 ? "neg" : "neutral"
-  );
-  setSnapshotMetric(
-    "snapshot1M",
-    Number.isFinite(latestPortfolioReturns.m1) ? formatSignedPercent(latestPortfolioReturns.m1) : "—",
-    latestPortfolioReturns.m1 > 0 ? "pos" : latestPortfolioReturns.m1 < 0 ? "neg" : "neutral"
-  );
-  setSnapshotMetric(
-    "snapshotYTD",
-    Number.isFinite(latestPortfolioReturns.ytd) ? formatSignedPercent(latestPortfolioReturns.ytd) : "—",
-    latestPortfolioReturns.ytd > 0 ? "pos" : latestPortfolioReturns.ytd < 0 ? "neg" : "neutral"
-  );
-  setSnapshotMetric("snapshotCashPct", fmtPercent.format(exposure.cashPct));
-  setSnapshotMetric("snapshotCryptoPct", fmtPercent.format(exposure.cryptoPct));
-}
-
 function renderAllocationExposure(rows) {
   const cryptoLine = document.getElementById("allocationCryptoLine");
   const cashLine = document.getElementById("allocationCashLine");
@@ -1371,7 +1493,6 @@ function scheduleLiveRender() {
   requestAnimationFrame(() => {
     liveUpdateScheduled = false;
     currentRows = liveRows;
-    renderSnapshotStrip(liveRows);
     renderSummary(liveRows);
     renderDailyGainLoss(liveRows);
     renderTable(liveRows);
@@ -1624,22 +1745,9 @@ function renderSummary(rows) {
     0
   );
   const dailyChangePct = totalValue ? dailyChangeValue / totalValue : 0;
-
-  const topMover = rows.reduce(
-    (best, row) =>
-      Math.abs(row.dailyPct) > Math.abs(best.dailyPct) ? row : best,
-    rows[0]
-  );
-
-  const monthRows = rows.filter((row) => row.monthPct !== null);
-  const yearRows = rows.filter((row) => row.yearPct !== null);
-
-  const monthPL = monthRows.length
-    ? monthRows.reduce((sum, row) => sum + row.value * row.monthPct, 0)
-    : null;
-  const yearPL = yearRows.length
-    ? yearRows.reduce((sum, row) => sum + row.value * row.yearPct, 0)
-    : null;
+  const snapshots = upsertTodayValueSnapshot(totalValue);
+  latestPortfolioReturns = computePortfolioReturns(totalValue, dailyChangePct, snapshots);
+  const exposure = getPortfolioExposure(rows);
 
   document.getElementById("totalValue").textContent = fmtCurrency.format(totalValue);
   document.getElementById("dailyChange").textContent = `${formatSignedPercent(
@@ -1648,28 +1756,23 @@ function renderSummary(rows) {
   document.getElementById("dailyChange").style.color =
     dailyChangeValue >= 0 ? "#62d99c" : "#f45b69";
 
-  document.getElementById("topMover").textContent = topMover.ticker;
-  document.getElementById("topMoverDelta").textContent = formatSignedPercent(
-    topMover.dailyPct
+  setSnapshotMetric(
+    "perf1W",
+    Number.isFinite(latestPortfolioReturns.w1) ? formatSignedPercent(latestPortfolioReturns.w1) : "—",
+    latestPortfolioReturns.w1 > 0 ? "pos" : latestPortfolioReturns.w1 < 0 ? "neg" : "neutral"
   );
-  document.getElementById("topMoverDelta").style.color =
-    topMover.dailyPct >= 0 ? "#62d99c" : "#f45b69";
-
-  document.getElementById("dailyPL").textContent = fmtCurrency.format(dailyChangeValue);
-  document.getElementById("dailyPL").style.color =
-    dailyChangeValue >= 0 ? "#62d99c" : "#f45b69";
-
-  document.getElementById("monthlyPL").textContent = monthPL
-    ? fmtCurrency.format(monthPL)
-    : "Add column";
-  document.getElementById("monthlyPL").style.color =
-    monthPL === null ? "#a6b0c3" : monthPL >= 0 ? "#62d99c" : "#f45b69";
-
-  document.getElementById("yearlyPL").textContent = yearPL
-    ? fmtCurrency.format(yearPL)
-    : "Add column";
-  document.getElementById("yearlyPL").style.color =
-    yearPL === null ? "#a6b0c3" : yearPL >= 0 ? "#62d99c" : "#f45b69";
+  setSnapshotMetric(
+    "perf1M",
+    Number.isFinite(latestPortfolioReturns.m1) ? formatSignedPercent(latestPortfolioReturns.m1) : "—",
+    latestPortfolioReturns.m1 > 0 ? "pos" : latestPortfolioReturns.m1 < 0 ? "neg" : "neutral"
+  );
+  setSnapshotMetric(
+    "perfYTD",
+    Number.isFinite(latestPortfolioReturns.ytd) ? formatSignedPercent(latestPortfolioReturns.ytd) : "—",
+    latestPortfolioReturns.ytd > 0 ? "pos" : latestPortfolioReturns.ytd < 0 ? "neg" : "neutral"
+  );
+  setSnapshotMetric("perfCashPct", fmtPercent.format(exposure.cashPct));
+  setSnapshotMetric("perfCryptoPct", fmtPercent.format(exposure.cryptoPct));
 }
 
 async function loadData() {
@@ -1704,7 +1807,6 @@ async function loadData() {
   rows.sort((a, b) => b.value - a.value);
 
   currentRows = rows;
-  renderSnapshotStrip(rows);
   renderSummary(rows);
   renderDailyGainLoss(rows);
   renderTable(rows);

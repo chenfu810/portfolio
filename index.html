@@ -10,7 +10,7 @@
       href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Space+Grotesk:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20260208-16" />
+    <link rel="stylesheet" href="styles.css?v=20260208-17" />
     <link rel="icon" href="favicon.svg" type="image/svg+xml" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   </head>
@@ -35,37 +35,6 @@
         </div>
       </header>
 
-      <section class="snapshot-strip" aria-label="Portfolio snapshot">
-        <article class="snapshot-card">
-          <p class="snapshot-label">Total Value</p>
-          <p id="snapshotTotalValue" class="snapshot-value">$0</p>
-        </article>
-        <article class="snapshot-card">
-          <p class="snapshot-label">Today P/L</p>
-          <p id="snapshotTodayPL" class="snapshot-value">$0</p>
-        </article>
-        <article class="snapshot-card">
-          <p class="snapshot-label">1W Return</p>
-          <p id="snapshot1W" class="snapshot-value">—</p>
-        </article>
-        <article class="snapshot-card">
-          <p class="snapshot-label">1M Return</p>
-          <p id="snapshot1M" class="snapshot-value">—</p>
-        </article>
-        <article class="snapshot-card">
-          <p class="snapshot-label">YTD Return</p>
-          <p id="snapshotYTD" class="snapshot-value">—</p>
-        </article>
-        <article class="snapshot-card">
-          <p class="snapshot-label">Cash %</p>
-          <p id="snapshotCashPct" class="snapshot-value">0.00%</p>
-        </article>
-        <article class="snapshot-card">
-          <p class="snapshot-label">Crypto %</p>
-          <p id="snapshotCryptoPct" class="snapshot-value">0.00%</p>
-        </article>
-      </section>
-
       <section class="hero">
         <div class="hero-card">
           <p class="label">Total Value</p>
@@ -73,21 +42,27 @@
           <p id="dailyChange" class="delta">+0.00% today</p>
         </div>
         <div class="hero-card highlight">
-          <p class="label">Top Mover</p>
-          <h3 id="topMover">—</h3>
-          <p id="topMoverDelta" class="delta">—</p>
-          <div class="mini-grid">
-            <div>
-              <p class="label">Daily P/L</p>
-              <p id="dailyPL">$0</p>
+          <p class="label">Performance & Mix</p>
+          <div class="performance-grid">
+            <div class="performance-item">
+              <p class="label">1W Return</p>
+              <p id="perf1W" class="performance-value">—</p>
             </div>
-            <div>
-              <p class="label">Monthly P/L</p>
-              <p id="monthlyPL">Add column</p>
+            <div class="performance-item">
+              <p class="label">1M Return</p>
+              <p id="perf1M" class="performance-value">—</p>
             </div>
-            <div>
-              <p class="label">Yearly P/L</p>
-              <p id="yearlyPL">Add column</p>
+            <div class="performance-item">
+              <p class="label">YTD Return</p>
+              <p id="perfYTD" class="performance-value">—</p>
+            </div>
+            <div class="performance-item">
+              <p class="label">Cash %</p>
+              <p id="perfCashPct" class="performance-value">0.00%</p>
+            </div>
+            <div class="performance-item">
+              <p class="label">Crypto %</p>
+              <p id="perfCryptoPct" class="performance-value">0.00%</p>
             </div>
           </div>
         </div>
@@ -124,6 +99,12 @@
         <div class="panel-header">
           <h3>Portfolio vs Benchmarks</h3>
           <p id="benchmarkMeta" class="subtle">Loading benchmark context...</p>
+        </div>
+        <div class="benchmark-curve-wrap">
+          <canvas id="benchmarkCurve"></canvas>
+          <div id="benchmarkCurveEmpty" class="empty" style="display: none">
+            Need more portfolio history to draw the curve. Keep this page running daily.
+          </div>
         </div>
         <div class="table-wrap">
           <table class="benchmark-table">
@@ -281,6 +262,6 @@
       </section>
     </main>
 
-    <script src="app.js?v=20260208-22"></script>
+    <script src="app.js?v=20260208-23"></script>
   </body>
 </html>
