@@ -256,6 +256,19 @@ h3 {
   text-align: center;
 }
 
+.treemap-block.ticker-pct {
+  padding: 8px;
+}
+
+.treemap-block.ticker-pct .title {
+  font-size: 11px;
+}
+
+.treemap-block.ticker-pct .pct {
+  margin-top: 4px;
+  font-size: 10px;
+}
+
 .treemap-block.leaf {
   cursor: default;
 }

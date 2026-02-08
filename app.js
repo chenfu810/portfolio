@@ -675,6 +675,8 @@ function getTreemapTextMode(item, rect) {
   const area = width * height;
   const ticker = (item.name || "").toString();
   const titleChars = Math.max(1, ticker.length);
+  const pct = formatSignedPercent(item.dailyPct || 0);
+  const pctChars = Math.max(1, pct.length);
 
   const compactPad = 6;
   const compactFont = 11;
@@ -698,6 +700,21 @@ function getTreemapTextMode(item, rect) {
 
   if (fullInnerW >= fullNeedW && fullInnerH >= fullNeedH) {
     return "full";
+  }
+
+  const pctPad = 8;
+  const pctTitleFont = 11;
+  const pctMetaFont = 10;
+  const pctInnerW = width - pctPad * 2;
+  const pctInnerH = height - pctPad * 2;
+  const pctNeedW = Math.max(
+    Math.ceil(titleChars * pctTitleFont * 0.62),
+    Math.ceil(pctChars * pctMetaFont * 0.56)
+  );
+  const pctNeedH =
+    Math.ceil(pctTitleFont * 1.25) + 4 + Math.ceil(pctMetaFont * 1.3);
+  if (pctInnerW >= pctNeedW && pctInnerH >= pctNeedH) {
+    return "tickerPct";
   }
   return "ticker";
 }
@@ -919,6 +936,8 @@ function renderTreemap(rows) {
       block.className = `treemap-block ${getSizeClass(area)} leaf`;
       if (textMode === "ticker") {
         block.classList.add("ticker-only");
+      } else if (textMode === "tickerPct") {
+        block.classList.add("ticker-pct");
       }
       block.style.left = `${item.rect.x}px`;
       block.style.top = `${item.rect.y}px`;
@@ -937,6 +956,13 @@ function renderTreemap(rows) {
             <div class="title">${item.name}</div>
             <div class="meta pct">${pct}</div>
             <div class="meta weight">${fmtPercent.format(weight)} of total</div>
+          </div>
+        `;
+      } else if (textMode === "tickerPct") {
+        block.innerHTML = `
+          <div>
+            <div class="title">${item.name}</div>
+            <div class="meta pct">${pct}</div>
           </div>
         `;
       } else {
