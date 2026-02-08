@@ -813,6 +813,32 @@ th {
   color: var(--muted);
 }
 
+.table-sort-btn {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.table-sort-btn .sort-arrow {
+  color: #8fa1c6;
+  font-size: 12px;
+  line-height: 1;
+  transition: color 0.12s ease;
+}
+
+.table-sort-btn.active .sort-arrow,
+.table-sort-btn:hover .sort-arrow {
+  color: #dce9ff;
+}
+
 tbody tr:hover {
   background: rgba(255, 255, 255, 0.02);
 }

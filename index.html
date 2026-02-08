@@ -10,7 +10,7 @@
       href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Space+Grotesk:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20260208-17" />
+    <link rel="stylesheet" href="styles.css?v=20260208-18" />
     <link rel="icon" href="favicon.svg" type="image/svg+xml" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   </head>
@@ -231,22 +231,32 @@
       <section class="panel table-panel">
         <div class="panel-header">
           <h3>Holdings</h3>
-          <div class="sort-wrap" id="holdingsSortToggle" role="group" aria-label="Sort holdings">
-            <span class="sort-label">Daily Value Change</span>
-            <button type="button" class="sort-pill active" data-sort="dailyValueDesc">Desc</button>
-            <button type="button" class="sort-pill" data-sort="dailyValueAsc">Asc</button>
-          </div>
         </div>
         <div class="table-wrap">
           <table>
-            <thead>
+            <thead id="holdingsHead">
               <tr>
                 <th>Ticker</th>
                 <th>Shares</th>
                 <th>Price</th>
-                <th>Daily %</th>
-                <th>Daily Value Change</th>
-                <th>Value</th>
+                <th>
+                  <button type="button" class="table-sort-btn" data-sort-key="dailyPct">
+                    Daily %
+                    <span class="sort-arrow" aria-hidden="true">↕</span>
+                  </button>
+                </th>
+                <th>
+                  <button type="button" class="table-sort-btn" data-sort-key="dailyValue">
+                    Daily Value Change
+                    <span class="sort-arrow" aria-hidden="true">↕</span>
+                  </button>
+                </th>
+                <th>
+                  <button type="button" class="table-sort-btn" data-sort-key="value">
+                    Value
+                    <span class="sort-arrow" aria-hidden="true">↕</span>
+                  </button>
+                </th>
               </tr>
             </thead>
             <tbody id="holdingsTable"></tbody>
@@ -262,6 +272,6 @@
       </section>
     </main>
 
-    <script src="app.js?v=20260208-23"></script>
+    <script src="app.js?v=20260208-24"></script>
   </body>
 </html>

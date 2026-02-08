@@ -30,7 +30,7 @@ let historyChart;
 let benchmarkCurveChart;
 let liveRows = [];
 let liveUpdateScheduled = false;
-let holdingsSortMode = "dailyValueDesc";
+let holdingsSortState = { key: "dailyValue", direction: "desc" };
 let currentRows = [];
 let currentNewsItems = [];
 let newsIsLoading = false;
@@ -1230,12 +1230,15 @@ function layoutTreemapVisibleItems(items, width, height) {
 
 function getSortedRows(rows) {
   const sorted = rows.slice();
-  const direction = holdingsSortMode === "dailyValueAsc" ? 1 : -1;
+  const direction = holdingsSortState.direction === "asc" ? 1 : -1;
+  const key = holdingsSortState.key;
   sorted.sort((a, b) => {
-    const aDelta = a.value * a.dailyPct;
-    const bDelta = b.value * b.dailyPct;
-    if (aDelta !== bDelta) {
-      return (aDelta - bDelta) * direction;
+    const aMetric =
+      key === "dailyPct" ? a.dailyPct : key === "value" ? a.value : a.value * a.dailyPct;
+    const bMetric =
+      key === "dailyPct" ? b.dailyPct : key === "value" ? b.value : b.value * b.dailyPct;
+    if (aMetric !== bMetric) {
+      return (aMetric - bMetric) * direction;
     }
     if (b.value !== a.value) {
       return b.value - a.value;
@@ -1243,6 +1246,24 @@ function getSortedRows(rows) {
     return b.dailyPct - a.dailyPct;
   });
   return sorted;
+}
+
+function updateHoldingsSortIndicators() {
+  const sortButtons = document.querySelectorAll("#holdingsHead .table-sort-btn");
+  sortButtons.forEach((button) => {
+    const key = button.dataset.sortKey;
+    const arrow = button.querySelector(".sort-arrow");
+    const isActive = key === holdingsSortState.key;
+    button.classList.toggle("active", isActive);
+    if (!arrow) {
+      return;
+    }
+    if (!isActive) {
+      arrow.textContent = "↕";
+      return;
+    }
+    arrow.textContent = holdingsSortState.direction === "asc" ? "↑" : "↓";
+  });
 }
 
 function getRobinhoodStockUrl(ticker) {
@@ -1280,6 +1301,7 @@ function renderTable(rows) {
     `;
     tbody.appendChild(tr);
   });
+  updateHoldingsSortIndicators();
 }
 
 function buildTreemapRows(rows) {
@@ -1856,15 +1878,17 @@ document.getElementById("themeToggle").addEventListener("click", (event) => {
   setTheme(button.dataset.theme);
 });
 
-document.getElementById("holdingsSortToggle").addEventListener("click", (event) => {
-  const button = event.target.closest("button[data-sort]");
+document.getElementById("holdingsHead").addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-sort-key]");
   if (!button) {
     return;
   }
-  holdingsSortMode = button.dataset.sort === "dailyValueAsc" ? "dailyValueAsc" : "dailyValueDesc";
-  document.querySelectorAll("#holdingsSortToggle .sort-pill").forEach((pill) => {
-    pill.classList.toggle("active", pill === button);
-  });
+  const nextKey = button.dataset.sortKey;
+  if (holdingsSortState.key === nextKey) {
+    holdingsSortState.direction = holdingsSortState.direction === "asc" ? "desc" : "asc";
+  } else {
+    holdingsSortState = { key: nextKey, direction: "desc" };
+  }
   renderTable(currentRows);
 });
 
