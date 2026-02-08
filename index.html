@@ -10,7 +10,7 @@
       href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Space+Grotesk:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20260207-8" />
+    <link rel="stylesheet" href="styles.css?v=20260208-9" />
     <link rel="icon" href="favicon.svg" type="image/svg+xml" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   </head>
@@ -62,11 +62,24 @@
             <h3>Daily Gain / Loss</h3>
             <p id="dailyTotalPLMeta" class="subtle">Today</p>
           </div>
-          <p id="dailyTotalPL" class="daily-total">$0</p>
+          <div class="daily-header-actions">
+            <p id="dailyTotalPL" class="daily-total">$0</p>
+            <button
+              id="dailyHistoryToggle"
+              class="daily-history-toggle"
+              type="button"
+              aria-expanded="false"
+              aria-controls="dailyHistoryWrap"
+            >
+              View Daily History
+            </button>
+          </div>
         </div>
-        <div id="dailyCalendarMonths" class="daily-calendar-months"></div>
-        <div id="dailyCalendarEmpty" class="empty" style="display: none">
-          Daily changes are saved automatically in this browser (from Feb 2026).
+        <div id="dailyHistoryWrap" class="daily-history-wrap" hidden>
+          <div id="dailyCalendarMonths" class="daily-calendar-months"></div>
+          <div id="dailyCalendarEmpty" class="empty" style="display: none">
+            Daily changes are saved automatically in this browser (from Feb 2026).
+          </div>
         </div>
       </section>
 
@@ -180,6 +193,6 @@
       </section>
     </main>
 
-    <script src="app.js?v=20260208-13"></script>
+    <script src="app.js?v=20260208-14"></script>
   </body>
 </html>

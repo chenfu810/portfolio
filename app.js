@@ -33,6 +33,7 @@ let holdingsSortMode = "value";
 let currentRows = [];
 let currentNewsItems = [];
 let newsIsLoading = false;
+let dailyHistoryExpanded = false;
 
 const DAILY_PL_STORAGE_KEY = "portfolio_pulse_daily_pl_v1";
 const DAILY_PL_HISTORY_LIMIT = 400;
@@ -144,6 +145,18 @@ function formatSignedPercent(value) {
     return `+${fmtPercent.format(safe)}`;
   }
   return fmtPercent.format(safe);
+}
+
+function setDailyHistoryExpanded(expanded) {
+  dailyHistoryExpanded = Boolean(expanded);
+  const toggleBtn = document.getElementById("dailyHistoryToggle");
+  const wrap = document.getElementById("dailyHistoryWrap");
+  if (!toggleBtn || !wrap) {
+    return;
+  }
+  wrap.hidden = !dailyHistoryExpanded;
+  toggleBtn.setAttribute("aria-expanded", dailyHistoryExpanded ? "true" : "false");
+  toggleBtn.textContent = dailyHistoryExpanded ? "Hide Daily History" : "View Daily History";
 }
 
 function toIsoLocal(date) {
@@ -1265,6 +1278,12 @@ document.getElementById("copyAdvicePrompt").addEventListener("click", async () =
     document.getElementById("adviceMeta").textContent = "Could not copy prompt. Please copy manually.";
   }
 });
+
+document.getElementById("dailyHistoryToggle").addEventListener("click", () => {
+  setDailyHistoryExpanded(!dailyHistoryExpanded);
+});
+
+setDailyHistoryExpanded(false);
 
 loadData().catch((err) => {
   alert(err.message);
