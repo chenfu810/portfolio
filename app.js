@@ -31,11 +31,12 @@ let liveRows = [];
 let liveUpdateScheduled = false;
 let holdingsSortMode = "value";
 let currentRows = [];
-let currentHistoryData = [];
 
 const TREEMAP_GAP_PX = 6;
 const TREEMAP_MIN_MAIN_SIDE_PX = 48;
 const TREEMAP_MICRO_THRESHOLD_PX = 44;
+const DAILY_PL_STORAGE_KEY = "portfolio_pulse_daily_pl_v1";
+const DAILY_PL_HISTORY_LIMIT = 400;
 
 function parseCSV(text) {
   const lines = text.trim().split(/\r?\n/);
@@ -121,34 +122,68 @@ function toIsoLocal(date) {
   return `${year}-${month}-${day}`;
 }
 
-function parseDateLoose(value) {
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
+function parseIsoDate(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value || "");
+  if (!match) {
     return null;
   }
+  const parsed = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
   parsed.setHours(0, 0, 0, 0);
-  return parsed;
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-function buildDailyPLMap(history) {
-  const sorted = history
-    .map((row) => ({
-      date: parseDateLoose(row.date),
-      value: Number(row.value),
-    }))
-    .filter((row) => row.date && Number.isFinite(row.value))
-    .sort((a, b) => a.date - b.date);
-
-  const map = new Map();
-  for (let i = 1; i < sorted.length; i += 1) {
-    const current = sorted[i];
-    const previous = sorted[i - 1];
-    map.set(toIsoLocal(current.date), current.value - previous.value);
+function loadStoredDailyPLHistory() {
+  try {
+    const raw = localStorage.getItem(DAILY_PL_STORAGE_KEY);
+    if (!raw) {
+      return [];
+    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed
+      .map((item) => ({
+        date: typeof item?.date === "string" ? item.date : "",
+        pl: Number(item?.pl),
+        pct: Number(item?.pct),
+      }))
+      .filter((item) => parseIsoDate(item.date) && Number.isFinite(item.pl))
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .slice(-DAILY_PL_HISTORY_LIMIT);
+  } catch (err) {
+    return [];
   }
-  return {
-    map,
-    lastDate: sorted.length ? sorted[sorted.length - 1].date : null,
+}
+
+function saveStoredDailyPLHistory(history) {
+  try {
+    localStorage.setItem(DAILY_PL_STORAGE_KEY, JSON.stringify(history.slice(-DAILY_PL_HISTORY_LIMIT)));
+  } catch (err) {
+    // Ignore storage failures (private mode, disabled storage, quota).
+  }
+}
+
+function upsertTodayDailyPL(pl, pct) {
+  const today = toIsoLocal(new Date());
+  const history = loadStoredDailyPLHistory();
+  const nextEntry = {
+    date: today,
+    pl: Number.isFinite(pl) ? pl : 0,
+    pct: Number.isFinite(pct) ? pct : 0,
   };
+  const idx = history.findIndex((item) => item.date === today);
+  if (idx >= 0) {
+    history[idx] = nextEntry;
+  } else {
+    history.push(nextEntry);
+    history.sort((a, b) => a.date.localeCompare(b.date));
+  }
+  if (history.length > DAILY_PL_HISTORY_LIMIT) {
+    history.splice(0, history.length - DAILY_PL_HISTORY_LIMIT);
+  }
+  saveStoredDailyPLHistory(history);
+  return history;
 }
 
 function getCalendarCellColor(plValue, maxAbs) {
@@ -415,7 +450,7 @@ function scheduleLiveRender() {
     liveUpdateScheduled = false;
     currentRows = liveRows;
     renderSummary(liveRows);
-    renderDailyGainLoss(liveRows, currentHistoryData);
+    renderDailyGainLoss(liveRows);
     renderTable(liveRows);
     renderTreemap(liveRows);
   });
@@ -547,7 +582,7 @@ function renderHistory(history) {
   });
 }
 
-function renderDailyGainLoss(rows, historyData) {
+function renderDailyGainLoss(rows) {
   const totalValue = rows.reduce((sum, row) => sum + row.value, 0);
   const dailyChangeValue = rows.reduce((sum, row) => sum + row.value * row.dailyPct, 0);
   const dailyChangePct = totalValue ? dailyChangeValue / totalValue : 0;
@@ -562,7 +597,9 @@ function renderDailyGainLoss(rows, historyData) {
   metaEl.textContent = `Today: ${fmtPercent.format(dailyChangePct)}`;
   metaEl.style.color = dailyChangeValue >= 0 ? "#62d99c" : "#f45b69";
 
-  const { map: plMap, lastDate } = buildDailyPLMap(historyData);
+  const history = upsertTodayDailyPL(dailyChangeValue, dailyChangePct);
+  const plMap = new Map(history.map((item) => [item.date, item.pl]));
+  const lastDate = history.length ? parseIsoDate(history[history.length - 1].date) : null;
   monthsEl.innerHTML = "";
 
   if (!plMap.size) {
@@ -729,10 +766,9 @@ async function loadData() {
 
   rows.sort((a, b) => b.value - a.value);
 
-  currentHistoryData = [];
   currentRows = rows;
   renderSummary(rows);
-  renderDailyGainLoss(rows, currentHistoryData);
+  renderDailyGainLoss(rows);
   renderTable(rows);
   renderTreemap(rows);
   const hasSheetPrices = rows.some((row) => row.price > 0);
@@ -754,9 +790,7 @@ async function loadData() {
       historyData = [];
     }
   }
-  currentHistoryData = historyData;
   renderHistory(historyData);
-  renderDailyGainLoss(rows, historyData);
 }
 
 document.getElementById("refreshBtn").addEventListener("click", () => {
