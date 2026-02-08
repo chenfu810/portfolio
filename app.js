@@ -38,6 +38,8 @@ let dailyHistoryExpanded = false;
 const DAILY_PL_STORAGE_KEY = "portfolio_pulse_daily_pl_v1";
 const DAILY_PL_HISTORY_LIMIT = 400;
 const DAILY_CALENDAR_START_ISO = "2026-02-01";
+const THEME_STORAGE_KEY = "portfolio_pulse_theme_v1";
+const THEME_OPTIONS = ["nocturne", "ocean", "ember"];
 
 const NEWS_RSS_SOURCES = {
   cnbc: {
@@ -90,6 +92,42 @@ function parseBooleanFlag(value) {
     normalized === "1" ||
     normalized === "t"
   );
+}
+
+function normalizeTheme(theme) {
+  const candidate = (theme || "").toString().trim().toLowerCase();
+  if (THEME_OPTIONS.includes(candidate)) {
+    return candidate;
+  }
+  return "nocturne";
+}
+
+function setTheme(theme) {
+  const normalized = normalizeTheme(theme);
+  document.body.classList.remove("theme-ocean", "theme-ember");
+  if (normalized !== "nocturne") {
+    document.body.classList.add(`theme-${normalized}`);
+  }
+  document.querySelectorAll("#themeToggle .theme-pill").forEach((button) => {
+    const isActive = button.dataset.theme === normalized;
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-pressed", isActive ? "true" : "false");
+  });
+  try {
+    localStorage.setItem(THEME_STORAGE_KEY, normalized);
+  } catch (err) {
+    // Ignore storage failures (private mode / blocked storage).
+  }
+}
+
+function initTheme() {
+  let saved = "nocturne";
+  try {
+    saved = localStorage.getItem(THEME_STORAGE_KEY) || "nocturne";
+  } catch (err) {
+    saved = "nocturne";
+  }
+  setTheme(saved);
 }
 
 function normalizeRow(row) {
@@ -1400,6 +1438,14 @@ document.getElementById("refreshBtn").addEventListener("click", () => {
   });
 });
 
+document.getElementById("themeToggle").addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-theme]");
+  if (!button) {
+    return;
+  }
+  setTheme(button.dataset.theme);
+});
+
 document.getElementById("holdingsSortToggle").addEventListener("click", (event) => {
   const button = event.target.closest("button[data-sort]");
   if (!button) {
@@ -1454,6 +1500,7 @@ document.getElementById("dailyHistoryToggle").addEventListener("click", () => {
 });
 
 setDailyHistoryExpanded(false);
+initTheme();
 
 loadData().catch((err) => {
   alert(err.message);
