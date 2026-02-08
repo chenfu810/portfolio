@@ -642,7 +642,7 @@ function generateBuiltInAdvice(rows, newsItems, mode) {
   const worst = sorted.reduce((acc, row) => (row.dailyPct < acc.dailyPct ? row : acc), sorted[0] || null);
   const best = sorted.reduce((acc, row) => (row.dailyPct > acc.dailyPct ? row : acc), sorted[0] || null);
   if (best && worst) {
-    lines.push(`Today's dispersion is wide: strongest is ${best.ticker} (${fmtPercent.format(best.dailyPct)}), weakest is ${worst.ticker} (${fmtPercent.format(worst.dailyPct)}). Re-check thesis before reacting to one-day moves.`);
+    lines.push(`Today's dispersion is wide: strongest is ${best.ticker} (${formatSignedPercent(best.dailyPct)}), weakest is ${worst.ticker} (${formatSignedPercent(worst.dailyPct)}). Re-check thesis before reacting to one-day moves.`);
   }
 
   if (mentions.length) {
@@ -859,7 +859,7 @@ function renderTable(rows) {
       <td>${row.shares.toLocaleString()}</td>
       <td>${priceDisplay}</td>
       <td class="${row.dailyPct >= 0 ? "pos" : "neg"}">
-        ${fmtPercent.format(row.dailyPct)}
+        ${formatSignedPercent(row.dailyPct)}
       </td>
       <td>${valueDisplay}</td>
     `;
@@ -1219,7 +1219,7 @@ function renderDailyGainLoss(rows) {
 
   totalEl.textContent = fmtCurrency.format(dailyChangeValue);
   totalEl.style.color = dailyChangeValue >= 0 ? "#62d99c" : "#f45b69";
-  metaEl.textContent = `Today: ${fmtPercent.format(dailyChangePct)} (since Feb 2026)`;
+  metaEl.textContent = `Today: ${formatSignedPercent(dailyChangePct)} (since Feb 2026)`;
   metaEl.style.color = dailyChangeValue >= 0 ? "#62d99c" : "#f45b69";
 
   const history = upsertTodayDailyPL(dailyChangeValue, dailyChangePct).filter(
@@ -1342,14 +1342,14 @@ function renderSummary(rows) {
     : null;
 
   document.getElementById("totalValue").textContent = fmtCurrency.format(totalValue);
-  document.getElementById("dailyChange").textContent = `${fmtPercent.format(
+  document.getElementById("dailyChange").textContent = `${formatSignedPercent(
     dailyChangePct
   )} today (${fmtCurrency.format(dailyChangeValue)})`;
   document.getElementById("dailyChange").style.color =
     dailyChangeValue >= 0 ? "#62d99c" : "#f45b69";
 
   document.getElementById("topMover").textContent = topMover.ticker;
-  document.getElementById("topMoverDelta").textContent = fmtPercent.format(
+  document.getElementById("topMoverDelta").textContent = formatSignedPercent(
     topMover.dailyPct
   );
   document.getElementById("topMoverDelta").style.color =
