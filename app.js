@@ -40,6 +40,18 @@ const DAILY_PL_HISTORY_LIMIT = 400;
 const DAILY_CALENDAR_START_ISO = "2026-02-01";
 const THEME_STORAGE_KEY = "portfolio_pulse_theme_v1";
 const THEME_OPTIONS = ["nocturne", "ocean", "ember"];
+const VALUE_SNAPSHOT_STORAGE_KEY = "portfolio_pulse_value_snapshots_v1";
+const VALUE_SNAPSHOT_HISTORY_LIMIT = 520;
+const BENCHMARK_SYMBOLS = ["SPY", "QQQ"];
+
+let latestPortfolioReturns = {
+  d1: null,
+  w1: null,
+  m1: null,
+  ytd: null,
+};
+let latestBenchmarkReturns = {};
+let benchmarkLastUpdatedAt = null;
 
 const NEWS_RSS_SOURCES = {
   cnbc: {
@@ -207,6 +219,126 @@ function formatSignedPercent(value) {
   return fmtPercent.format(safe);
 }
 
+function formatSignedCurrency(value) {
+  const num = Number(value);
+  const safe = Number.isFinite(num) ? num : 0;
+  if (safe > 0) {
+    return `+${fmtCurrency.format(safe)}`;
+  }
+  return fmtCurrency.format(safe);
+}
+
+function loadStoredValueSnapshots() {
+  try {
+    const raw = localStorage.getItem(VALUE_SNAPSHOT_STORAGE_KEY);
+    if (!raw) {
+      return [];
+    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed
+      .map((item) => ({
+        date: typeof item?.date === "string" ? item.date : "",
+        value: Number(item?.value),
+      }))
+      .filter((item) => parseIsoDate(item.date) && Number.isFinite(item.value) && item.value > 0)
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .slice(-VALUE_SNAPSHOT_HISTORY_LIMIT);
+  } catch (err) {
+    return [];
+  }
+}
+
+function saveStoredValueSnapshots(history) {
+  try {
+    localStorage.setItem(
+      VALUE_SNAPSHOT_STORAGE_KEY,
+      JSON.stringify(history.slice(-VALUE_SNAPSHOT_HISTORY_LIMIT))
+    );
+  } catch (err) {
+    // Ignore storage failures.
+  }
+}
+
+function upsertTodayValueSnapshot(totalValue) {
+  const today = toIsoLocal(new Date());
+  const history = loadStoredValueSnapshots();
+  const entry = {
+    date: today,
+    value: Number.isFinite(totalValue) && totalValue > 0 ? totalValue : 0,
+  };
+  const idx = history.findIndex((item) => item.date === today);
+  if (idx >= 0) {
+    history[idx] = entry;
+  } else {
+    history.push(entry);
+    history.sort((a, b) => a.date.localeCompare(b.date));
+  }
+  if (history.length > VALUE_SNAPSHOT_HISTORY_LIMIT) {
+    history.splice(0, history.length - VALUE_SNAPSHOT_HISTORY_LIMIT);
+  }
+  saveStoredValueSnapshots(history);
+  return history;
+}
+
+function getEntryOnOrBefore(history, targetDate) {
+  const targetIso = toIsoLocal(targetDate);
+  for (let idx = history.length - 1; idx >= 0; idx -= 1) {
+    if (history[idx].date <= targetIso) {
+      return history[idx];
+    }
+  }
+  return null;
+}
+
+function getReturnFromBase(currentValue, baseValue) {
+  if (!Number.isFinite(currentValue) || !Number.isFinite(baseValue) || baseValue <= 0) {
+    return null;
+  }
+  return currentValue / baseValue - 1;
+}
+
+function computePortfolioReturns(totalValue, dailyChangePct, history) {
+  const now = new Date();
+  const oneWeek = new Date(now);
+  oneWeek.setDate(oneWeek.getDate() - 7);
+  const oneMonth = new Date(now);
+  oneMonth.setDate(oneMonth.getDate() - 30);
+  const ytdStart = new Date(now.getFullYear(), 0, 1);
+
+  const weekBase = getEntryOnOrBefore(history, oneWeek);
+  const monthBase = getEntryOnOrBefore(history, oneMonth);
+  const ytdCandidates = history.filter((item) => item.date >= toIsoLocal(ytdStart));
+  const ytdBase = ytdCandidates.length ? ytdCandidates[0] : null;
+
+  return {
+    d1: Number.isFinite(dailyChangePct) ? dailyChangePct : null,
+    w1: weekBase ? getReturnFromBase(totalValue, weekBase.value) : null,
+    m1: monthBase ? getReturnFromBase(totalValue, monthBase.value) : null,
+    ytd: ytdBase ? getReturnFromBase(totalValue, ytdBase.value) : null,
+  };
+}
+
+function getPortfolioExposure(rows) {
+  const valued = rows.filter((row) => Number.isFinite(row.value) && row.value > 0);
+  const totalValue = valued.reduce((sum, row) => sum + row.value, 0);
+  const cryptoValue = valued
+    .filter((row) => row.isCrypto)
+    .reduce((sum, row) => sum + row.value, 0);
+  const cashValue = valued
+    .filter((row) => row.isCash)
+    .reduce((sum, row) => sum + row.value, 0);
+  return {
+    totalValue,
+    cryptoValue,
+    cashValue,
+    cryptoPct: totalValue > 0 ? cryptoValue / totalValue : 0,
+    cashPct: totalValue > 0 ? cashValue / totalValue : 0,
+  };
+}
+
 function setDailyHistoryExpanded(expanded) {
   dailyHistoryExpanded = Boolean(expanded);
   const toggleBtn = document.getElementById("dailyHistoryToggle");
@@ -353,6 +485,134 @@ function classifyNewsFocus(item) {
 
 function buildRssProxyUrl(feedUrl) {
   return `https://api.allorigins.win/raw?url=${encodeURIComponent(feedUrl)}`;
+}
+
+async function fetchBenchmarkSeries(symbol) {
+  const stooqSymbol = symbol.toLowerCase();
+  const feedUrl = `https://stooq.com/q/d/l/?s=${stooqSymbol}.us&i=d`;
+  try {
+    const response = await fetch(buildRssProxyUrl(feedUrl));
+    if (!response.ok) {
+      return [];
+    }
+    const csv = await response.text();
+    const lines = csv.trim().split(/\r?\n/).slice(1);
+    return lines
+      .map((line) => {
+        const cols = line.split(",");
+        const date = (cols[0] || "").trim();
+        const close = Number(cols[4]);
+        const parsedDate = parseIsoDate(date);
+        if (!parsedDate || !Number.isFinite(close) || close <= 0) {
+          return null;
+        }
+        return { date, ms: parsedDate.getTime(), close };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.ms - b.ms);
+  } catch (err) {
+    return [];
+  }
+}
+
+function getSeriesPointOnOrBefore(series, targetMs) {
+  for (let idx = series.length - 1; idx >= 0; idx -= 1) {
+    if (series[idx].ms <= targetMs) {
+      return series[idx];
+    }
+  }
+  return null;
+}
+
+function computeBenchmarkReturns(series) {
+  if (!series.length) {
+    return { d1: null, w1: null, m1: null, ytd: null };
+  }
+  const last = series[series.length - 1];
+  const prev = series.length >= 2 ? series[series.length - 2] : null;
+  const weekTarget = last.ms - 7 * 24 * 60 * 60 * 1000;
+  const monthTarget = last.ms - 30 * 24 * 60 * 60 * 1000;
+  const ytdStart = new Date(new Date(last.ms).getFullYear(), 0, 1).getTime();
+  const weekBase = getSeriesPointOnOrBefore(series, weekTarget);
+  const monthBase = getSeriesPointOnOrBefore(series, monthTarget);
+  const ytdBase = series.find((item) => item.ms >= ytdStart) || null;
+
+  return {
+    d1: prev ? getReturnFromBase(last.close, prev.close) : null,
+    w1: weekBase ? getReturnFromBase(last.close, weekBase.close) : null,
+    m1: monthBase ? getReturnFromBase(last.close, monthBase.close) : null,
+    ytd: ytdBase ? getReturnFromBase(last.close, ytdBase.close) : null,
+  };
+}
+
+function setReturnCellValue(cellId, value) {
+  const cell = document.getElementById(cellId);
+  if (!cell) {
+    return;
+  }
+  cell.classList.remove("pos", "neg");
+  if (!Number.isFinite(value)) {
+    cell.textContent = "—";
+    return;
+  }
+  cell.textContent = formatSignedPercent(value);
+  if (value > 0) {
+    cell.classList.add("pos");
+  } else if (value < 0) {
+    cell.classList.add("neg");
+  }
+}
+
+function renderBenchmarkContext() {
+  setReturnCellValue("benchmarkPortfolio1D", latestPortfolioReturns.d1);
+  setReturnCellValue("benchmarkPortfolio1W", latestPortfolioReturns.w1);
+  setReturnCellValue("benchmarkPortfolio1M", latestPortfolioReturns.m1);
+  setReturnCellValue("benchmarkPortfolioYTD", latestPortfolioReturns.ytd);
+
+  const spy = latestBenchmarkReturns.SPY || {};
+  const qqq = latestBenchmarkReturns.QQQ || {};
+  setReturnCellValue("benchmarkSPY1D", spy.d1);
+  setReturnCellValue("benchmarkSPY1W", spy.w1);
+  setReturnCellValue("benchmarkSPY1M", spy.m1);
+  setReturnCellValue("benchmarkSPYYTD", spy.ytd);
+  setReturnCellValue("benchmarkQQQ1D", qqq.d1);
+  setReturnCellValue("benchmarkQQQ1W", qqq.w1);
+  setReturnCellValue("benchmarkQQQ1M", qqq.m1);
+  setReturnCellValue("benchmarkQQQYTD", qqq.ytd);
+
+  const meta = document.getElementById("benchmarkMeta");
+  if (!meta) {
+    return;
+  }
+  if (!benchmarkLastUpdatedAt) {
+    meta.textContent = "Loading SPY and QQQ context...";
+    return;
+  }
+  const updated = benchmarkLastUpdatedAt.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  meta.textContent = `SPY/QQQ via Stooq (EOD close). Updated ${updated}.`;
+}
+
+async function refreshBenchmarkContext() {
+  const meta = document.getElementById("benchmarkMeta");
+  if (meta) {
+    meta.textContent = "Loading SPY and QQQ context...";
+  }
+  const results = await Promise.all(
+    BENCHMARK_SYMBOLS.map(async (symbol) => {
+      const series = await fetchBenchmarkSeries(symbol);
+      return [symbol, computeBenchmarkReturns(series), series.length > 0];
+    })
+  );
+  latestBenchmarkReturns = Object.fromEntries(results.map(([symbol, returns]) => [symbol, returns]));
+  const hasAnyData = results.some(([, , hasData]) => hasData);
+  benchmarkLastUpdatedAt = hasAnyData ? new Date() : null;
+  renderBenchmarkContext();
+  if (!hasAnyData && meta) {
+    meta.textContent = "Benchmark feed unavailable. Click Refresh to retry.";
+  }
 }
 
 async function fetchNewsFromSource(sourceKey) {
@@ -531,8 +791,8 @@ function renderNewsDigest(items, context = {}) {
     const empty = document.createElement("div");
     empty.className = "empty";
     empty.textContent = context.fetchedAny
-      ? "Try a different focus."
-      : "Try Refresh News or switch source.";
+      ? "Try switching focus to 'All Market' or choosing a broader source."
+      : "No feed response right now. Click Refresh News, then try a different source.";
     list.appendChild(empty);
     return;
   }
@@ -700,16 +960,16 @@ function renderExpertAdvice(rows, newsItems) {
 }
 
 function getHeatColor(pct) {
-  const clamped = Math.max(-0.12, Math.min(0.12, pct || 0));
-  const t = Math.min(1, Math.abs(clamped) / 0.12);
-  const from = clamped >= 0 ? [33, 88, 56] : [98, 41, 48];
-  const to = clamped >= 0 ? [86, 196, 132] : [229, 96, 107];
+  const clamped = Math.max(-0.1, Math.min(0.1, pct || 0));
+  const t = Math.pow(Math.min(1, Math.abs(clamped) / 0.1), 0.85);
+  const from = clamped >= 0 ? [36, 62, 52] : [66, 42, 46];
+  const to = clamped >= 0 ? [63, 164, 117] : [186, 79, 92];
   const r = Math.round(from[0] + (to[0] - from[0]) * t);
   const g = Math.round(from[1] + (to[1] - from[1]) * t);
   const b = Math.round(from[2] + (to[2] - from[2]) * t);
   return {
     fill: `rgb(${r}, ${g}, ${b})`,
-    border: `rgb(${Math.max(0, r - 20)}, ${Math.max(0, g - 20)}, ${Math.max(0, b - 20)})`,
+    border: `rgb(${Math.max(0, r - 12)}, ${Math.max(0, g - 12)}, ${Math.max(0, b - 12)})`,
   };
 }
 
@@ -878,6 +1138,112 @@ function buildTreemapRows(rows) {
     .sort((a, b) => b.value - a.value);
 }
 
+function setSnapshotMetric(id, value, type = "neutral") {
+  const el = document.getElementById(id);
+  if (!el) {
+    return;
+  }
+  el.textContent = value;
+  el.classList.remove("pos", "neg");
+  if (type === "pos") {
+    el.classList.add("pos");
+  } else if (type === "neg") {
+    el.classList.add("neg");
+  }
+}
+
+function renderSnapshotStrip(rows) {
+  const totalValue = rows.reduce((sum, row) => sum + row.value, 0);
+  const dailyChangeValue = rows.reduce((sum, row) => sum + row.value * row.dailyPct, 0);
+  const dailyChangePct = totalValue ? dailyChangeValue / totalValue : 0;
+  const snapshots = upsertTodayValueSnapshot(totalValue);
+  latestPortfolioReturns = computePortfolioReturns(totalValue, dailyChangePct, snapshots);
+  const exposure = getPortfolioExposure(rows);
+
+  setSnapshotMetric("snapshotTotalValue", fmtCurrency.format(totalValue));
+  setSnapshotMetric(
+    "snapshotTodayPL",
+    `${formatSignedCurrency(dailyChangeValue)} (${formatSignedPercent(dailyChangePct)})`,
+    dailyChangeValue > 0 ? "pos" : dailyChangeValue < 0 ? "neg" : "neutral"
+  );
+  setSnapshotMetric(
+    "snapshot1W",
+    Number.isFinite(latestPortfolioReturns.w1) ? formatSignedPercent(latestPortfolioReturns.w1) : "—",
+    latestPortfolioReturns.w1 > 0 ? "pos" : latestPortfolioReturns.w1 < 0 ? "neg" : "neutral"
+  );
+  setSnapshotMetric(
+    "snapshot1M",
+    Number.isFinite(latestPortfolioReturns.m1) ? formatSignedPercent(latestPortfolioReturns.m1) : "—",
+    latestPortfolioReturns.m1 > 0 ? "pos" : latestPortfolioReturns.m1 < 0 ? "neg" : "neutral"
+  );
+  setSnapshotMetric(
+    "snapshotYTD",
+    Number.isFinite(latestPortfolioReturns.ytd) ? formatSignedPercent(latestPortfolioReturns.ytd) : "—",
+    latestPortfolioReturns.ytd > 0 ? "pos" : latestPortfolioReturns.ytd < 0 ? "neg" : "neutral"
+  );
+  setSnapshotMetric("snapshotCashPct", fmtPercent.format(exposure.cashPct));
+  setSnapshotMetric("snapshotCryptoPct", fmtPercent.format(exposure.cryptoPct));
+}
+
+function renderTopContributors(rows) {
+  const gainersEl = document.getElementById("contributorsGainers");
+  const losersEl = document.getElementById("contributorsLosers");
+  const metaEl = document.getElementById("contributorsMeta");
+  if (!gainersEl || !losersEl || !metaEl) {
+    return;
+  }
+
+  const contributions = rows
+    .filter((row) => row.ticker && Number.isFinite(row.value) && Number.isFinite(row.dailyPct))
+    .map((row) => ({
+      ticker: row.ticker.toUpperCase(),
+      contribution: row.value * row.dailyPct,
+      dailyPct: row.dailyPct,
+    }));
+  const gainers = contributions
+    .filter((row) => row.contribution > 0)
+    .sort((a, b) => b.contribution - a.contribution)
+    .slice(0, 4);
+  const losers = contributions
+    .filter((row) => row.contribution < 0)
+    .sort((a, b) => a.contribution - b.contribution)
+    .slice(0, 4);
+
+  function renderList(target, list, emptyText) {
+    target.innerHTML = "";
+    if (!list.length) {
+      const empty = document.createElement("li");
+      empty.className = "empty";
+      empty.textContent = emptyText;
+      target.appendChild(empty);
+      return;
+    }
+    list.forEach((row) => {
+      const item = document.createElement("li");
+      item.className = "contributor-item";
+      const url = getRobinhoodStockUrl(row.ticker);
+      const ticker = url
+        ? `<a class="ticker-link" href="${url}" target="_blank" rel="noopener noreferrer">${row.ticker}</a>`
+        : row.ticker;
+      item.innerHTML = `
+        <span>${ticker}</span>
+        <span class="${row.contribution >= 0 ? "pos" : "neg"}">${formatSignedCurrency(
+        row.contribution
+      )} (${formatSignedPercent(row.dailyPct)})</span>
+      `;
+      target.appendChild(item);
+    });
+  }
+
+  renderList(gainersEl, gainers, "No positive contributors yet. Try Refresh after market updates.");
+  renderList(losersEl, losers, "No negative contributors yet. This side updates when holdings are down.");
+
+  const totalContribution = contributions.reduce((sum, row) => sum + row.contribution, 0);
+  metaEl.textContent = `Contribution = value x daily %. Net today: ${formatSignedCurrency(
+    totalContribution
+  )}.`;
+}
+
 function renderAllocationExposure(rows) {
   const cryptoLine = document.getElementById("allocationCryptoLine");
   const cashLine = document.getElementById("allocationCashLine");
@@ -885,22 +1251,13 @@ function renderAllocationExposure(rows) {
     return;
   }
 
-  const valued = rows.filter((row) => Number.isFinite(row.value) && row.value > 0);
-  const totalValue = valued.reduce((sum, row) => sum + row.value, 0);
-  const cryptoValue = valued
-    .filter((row) => row.isCrypto)
-    .reduce((sum, row) => sum + row.value, 0);
-  const cashValue = valued
-    .filter((row) => row.isCash)
-    .reduce((sum, row) => sum + row.value, 0);
-  const cryptoPct = totalValue > 0 ? cryptoValue / totalValue : 0;
-  const cashPct = totalValue > 0 ? cashValue / totalValue : 0;
+  const exposure = getPortfolioExposure(rows);
 
   cryptoLine.textContent = `Digital asset exposure: ${fmtPercent.format(
-    cryptoPct
+    exposure.cryptoPct
   )} of total portfolio value.`;
   cashLine.textContent = `Cash allocation: ${fmtPercent.format(
-    cashPct
+    exposure.cashPct
   )} of total portfolio value.`;
 }
 
@@ -1073,10 +1430,13 @@ function scheduleLiveRender() {
   requestAnimationFrame(() => {
     liveUpdateScheduled = false;
     currentRows = liveRows;
+    renderSnapshotStrip(liveRows);
     renderSummary(liveRows);
     renderDailyGainLoss(liveRows);
+    renderTopContributors(liveRows);
     renderTable(liveRows);
     renderTreemap(liveRows);
+    renderBenchmarkContext();
     renderExpertAdvice(liveRows, currentNewsItems);
   });
 }
@@ -1404,10 +1764,13 @@ async function loadData() {
   rows.sort((a, b) => b.value - a.value);
 
   currentRows = rows;
+  renderSnapshotStrip(rows);
   renderSummary(rows);
   renderDailyGainLoss(rows);
+  renderTopContributors(rows);
   renderTable(rows);
   renderTreemap(rows);
+  renderBenchmarkContext();
   renderExpertAdvice(rows, currentNewsItems);
   const hasSheetPrices = rows.some((row) => row.price > 0);
   if (!hasSheetPrices) {
@@ -1430,6 +1793,12 @@ async function loadData() {
   }
   renderHistory(historyData);
   loadNewsDigest();
+  refreshBenchmarkContext().catch(() => {
+    const meta = document.getElementById("benchmarkMeta");
+    if (meta) {
+      meta.textContent = "Benchmark fetch failed. Click Refresh to retry.";
+    }
+  });
 }
 
 document.getElementById("refreshBtn").addEventListener("click", () => {

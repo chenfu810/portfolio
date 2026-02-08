@@ -10,7 +10,7 @@
       href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Space+Grotesk:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20260208-14" />
+    <link rel="stylesheet" href="styles.css?v=20260208-15" />
     <link rel="icon" href="favicon.svg" type="image/svg+xml" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   </head>
@@ -34,6 +34,37 @@
           <button id="refreshBtn" class="ghost-btn">Refresh</button>
         </div>
       </header>
+
+      <section class="snapshot-strip" aria-label="Portfolio snapshot">
+        <article class="snapshot-card">
+          <p class="snapshot-label">Total Value</p>
+          <p id="snapshotTotalValue" class="snapshot-value">$0</p>
+        </article>
+        <article class="snapshot-card">
+          <p class="snapshot-label">Today P/L</p>
+          <p id="snapshotTodayPL" class="snapshot-value">$0</p>
+        </article>
+        <article class="snapshot-card">
+          <p class="snapshot-label">1W Return</p>
+          <p id="snapshot1W" class="snapshot-value">—</p>
+        </article>
+        <article class="snapshot-card">
+          <p class="snapshot-label">1M Return</p>
+          <p id="snapshot1M" class="snapshot-value">—</p>
+        </article>
+        <article class="snapshot-card">
+          <p class="snapshot-label">YTD Return</p>
+          <p id="snapshotYTD" class="snapshot-value">—</p>
+        </article>
+        <article class="snapshot-card">
+          <p class="snapshot-label">Cash %</p>
+          <p id="snapshotCashPct" class="snapshot-value">0.00%</p>
+        </article>
+        <article class="snapshot-card">
+          <p class="snapshot-label">Crypto %</p>
+          <p id="snapshotCryptoPct" class="snapshot-value">0.00%</p>
+        </article>
+      </section>
 
       <section class="hero">
         <div class="hero-card">
@@ -85,6 +116,66 @@
           <div id="dailyCalendarMonths" class="daily-calendar-months"></div>
           <div id="dailyCalendarEmpty" class="empty" style="display: none">
             Daily changes are saved automatically in this browser (from Feb 2026).
+          </div>
+        </div>
+      </section>
+
+      <section class="panel benchmark-panel">
+        <div class="panel-header">
+          <h3>Portfolio vs Benchmarks</h3>
+          <p id="benchmarkMeta" class="subtle">Loading benchmark context...</p>
+        </div>
+        <div class="table-wrap">
+          <table class="benchmark-table">
+            <thead>
+              <tr>
+                <th>Instrument</th>
+                <th>1D</th>
+                <th>1W</th>
+                <th>1M</th>
+                <th>YTD</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">Portfolio</th>
+                <td id="benchmarkPortfolio1D">—</td>
+                <td id="benchmarkPortfolio1W">—</td>
+                <td id="benchmarkPortfolio1M">—</td>
+                <td id="benchmarkPortfolioYTD">—</td>
+              </tr>
+              <tr>
+                <th scope="row">SPY</th>
+                <td id="benchmarkSPY1D">—</td>
+                <td id="benchmarkSPY1W">—</td>
+                <td id="benchmarkSPY1M">—</td>
+                <td id="benchmarkSPYYTD">—</td>
+              </tr>
+              <tr>
+                <th scope="row">QQQ</th>
+                <td id="benchmarkQQQ1D">—</td>
+                <td id="benchmarkQQQ1W">—</td>
+                <td id="benchmarkQQQ1M">—</td>
+                <td id="benchmarkQQQYTD">—</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel contributors-panel">
+        <div class="panel-header">
+          <h3>Top Contributors Today</h3>
+          <p id="contributorsMeta" class="subtle">Contribution = value x daily %.</p>
+        </div>
+        <div class="contributors-grid">
+          <div class="contributors-col">
+            <h4 class="contributors-title">Gainers</h4>
+            <ul id="contributorsGainers" class="contributors-list"></ul>
+          </div>
+          <div class="contributors-col">
+            <h4 class="contributors-title">Losers</h4>
+            <ul id="contributorsLosers" class="contributors-list"></ul>
           </div>
         </div>
       </section>
@@ -168,7 +259,7 @@
         </div>
         <div id="historyEmpty" class="empty">
           Add a history tab with columns: <span class="mono">date</span>,
-          <span class="mono">total value</span>.
+          <span class="mono">total value</span>. Then click <span class="mono">Refresh</span>.
         </div>
         <canvas id="historyChart"></canvas>
       </section>
@@ -206,6 +297,6 @@
       </section>
     </main>
 
-    <script src="app.js?v=20260208-20"></script>
+    <script src="app.js?v=20260208-21"></script>
   </body>
 </html>
