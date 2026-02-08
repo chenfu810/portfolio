@@ -183,6 +183,41 @@ h1 {
   margin-bottom: var(--space-4);
 }
 
+.status-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  margin-bottom: var(--space-3);
+}
+
+.status-pill {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--muted);
+}
+
+.status-pill.fresh {
+  border-color: rgba(98, 217, 156, 0.45);
+  color: #c8f5de;
+  background: linear-gradient(135deg, rgba(98, 217, 156, 0.16), rgba(98, 217, 156, 0.04));
+}
+
+.status-pill.delayed {
+  border-color: rgba(248, 193, 92, 0.45);
+  color: #ffe6b8;
+  background: linear-gradient(135deg, rgba(248, 193, 92, 0.2), rgba(248, 193, 92, 0.05));
+}
+
+.status-pill.stale {
+  border-color: rgba(244, 91, 105, 0.5);
+  color: #ffd2d8;
+  background: linear-gradient(135deg, rgba(244, 91, 105, 0.2), rgba(244, 91, 105, 0.05));
+}
+
 .performance-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
@@ -764,6 +799,70 @@ h1 {
   background: linear-gradient(160deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01)),
     var(--panel-strong);
   margin-bottom: var(--space-2);
+}
+
+.exposure-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.exposure-card {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 12px;
+}
+
+.exposure-label {
+  margin-bottom: 10px;
+}
+
+.exposure-list {
+  display: grid;
+  gap: 10px;
+}
+
+.exposure-row {
+  display: grid;
+  gap: 6px;
+}
+
+.exposure-row-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: #e6edfb;
+}
+
+.exposure-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.exposure-pct {
+  color: #d8e5ff;
+  font-weight: 700;
+}
+
+.exposure-track {
+  position: relative;
+  width: 100%;
+  height: 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  overflow: hidden;
+}
+
+.exposure-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
 }
 
 .table-wrap {
