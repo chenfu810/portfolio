@@ -44,15 +44,15 @@ const DAILY_CALENDAR_START_ISO = "2026-02-01";
 const NEWS_RSS_SOURCES = {
   cnbc: {
     label: "CNBC",
-    url: "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+    rssUrl: "https://www.cnbc.com/id/100003114/device/rss/rss.html",
   },
   yahoo: {
     label: "Yahoo Finance",
-    url: "https://finance.yahoo.com/news/rssindex",
+    rssUrl: "https://finance.yahoo.com/news/rssindex",
   },
   reuters: {
     label: "Reuters",
-    url: "http://feeds.reuters.com/reuters/businessNews",
+    rssUrl: "http://feeds.reuters.com/reuters/businessNews",
   },
 };
 
@@ -272,8 +272,8 @@ function classifyNewsFocus(item) {
   return "all";
 }
 
-function buildRss2JsonUrl(feedUrl) {
-  return `https://api.rss2json.com/v1/api.json?count=15&rss_url=${encodeURIComponent(feedUrl)}`;
+function buildRssProxyUrl(feedUrl) {
+  return `https://api.allorigins.win/raw?url=${encodeURIComponent(feedUrl)}`;
 }
 
 async function fetchNewsFromSource(sourceKey) {
@@ -282,22 +282,27 @@ async function fetchNewsFromSource(sourceKey) {
     return [];
   }
   try {
-    const response = await fetch(buildRss2JsonUrl(source.url));
+    const response = await fetch(buildRssProxyUrl(source.rssUrl));
     if (!response.ok) {
       return [];
     }
-    const data = await response.json();
-    const items = Array.isArray(data?.items) ? data.items : [];
-    return items.map((item) => {
-      const publishedAt = item?.pubDate ? new Date(item.pubDate) : null;
+    const xmlText = await response.text();
+    const xml = new DOMParser().parseFromString(xmlText, "application/xml");
+    const items = Array.from(xml.querySelectorAll("item")).slice(0, 20);
+    return items.map((itemNode) => {
+      const title = stripHtml(itemNode.querySelector("title")?.textContent || "");
+      const description = itemNode.querySelector("description")?.textContent || "";
+      const link = (itemNode.querySelector("link")?.textContent || "").trim();
+      const pubDate = itemNode.querySelector("pubDate")?.textContent || "";
+      const publishedAt = pubDate ? new Date(pubDate) : null;
       return {
         source: source.label,
-        title: stripHtml(item?.title || ""),
-        summary: summarizeText(item?.description || item?.content || ""),
-        link: item?.link || "",
+        title,
+        summary: summarizeText(description),
+        link,
         publishedAt: publishedAt && !Number.isNaN(publishedAt.getTime()) ? publishedAt : null,
       };
-    });
+    }).filter((item) => item.title);
   } catch (err) {
     return [];
   }
@@ -349,27 +354,42 @@ async function loadNewsDigest() {
   const sourceKeys =
     selectedSource === "all" ? Object.keys(NEWS_RSS_SOURCES) : [selectedSource];
   const groups = await Promise.all(sourceKeys.map((key) => fetchNewsFromSource(key)));
+  const fetchedAny = groups.some((group) => group.length > 0);
   const merged = dedupeNewsItems(groups.flat())
     .filter((item) => item.title)
     .sort((a, b) => (b.publishedAt?.getTime?.() || 0) - (a.publishedAt?.getTime?.() || 0));
   const focused = filterNewsByFocus(merged, selectedFocus).slice(0, 12);
 
   currentNewsItems = focused;
-  renderNewsDigest(focused);
+  renderNewsDigest(focused, {
+    fetchedAny,
+    selectedSource,
+    selectedFocus,
+  });
   renderExpertAdvice(currentRows, currentNewsItems);
   newsIsLoading = false;
 }
 
-function renderNewsDigest(items) {
+function renderNewsDigest(items, context = {}) {
   const list = document.getElementById("newsList");
   const meta = document.getElementById("newsMeta");
   list.innerHTML = "";
 
   if (!items.length) {
-    meta.textContent = "No headlines available for this filter right now.";
+    const sourceLabel =
+      context.selectedSource && context.selectedSource !== "all"
+        ? NEWS_RSS_SOURCES[context.selectedSource]?.label || "Selected source"
+        : "selected sources";
+    if (context.fetchedAny) {
+      meta.textContent = "Headlines loaded, but none matched this focus filter.";
+    } else {
+      meta.textContent = `Could not load live headlines from ${sourceLabel} right now.`;
+    }
     const empty = document.createElement("div");
     empty.className = "empty";
-    empty.textContent = "Try a different source or focus.";
+    empty.textContent = context.fetchedAny
+      ? "Try a different focus."
+      : "Try Refresh News or switch source.";
     list.appendChild(empty);
     return;
   }
