@@ -37,6 +37,7 @@ const TREEMAP_MIN_MAIN_SIDE_PX = 48;
 const TREEMAP_MICRO_THRESHOLD_PX = 44;
 const DAILY_PL_STORAGE_KEY = "portfolio_pulse_daily_pl_v1";
 const DAILY_PL_HISTORY_LIMIT = 400;
+const DAILY_CALENDAR_START_ISO = "2026-02-01";
 
 function parseCSV(text) {
   const lines = text.trim().split(/\r?\n/);
@@ -197,6 +198,25 @@ function getCalendarCellColor(plValue, maxAbs) {
   const g = Math.round(from[1] + (to[1] - from[1]) * ratio);
   const b = Math.round(from[2] + (to[2] - from[2]) * ratio);
   return `rgb(${r}, ${g}, ${b})`;
+}
+
+function formatDailyCellAmount(value) {
+  const abs = Math.abs(value);
+  let scaled = abs;
+  let suffix = "";
+  if (abs >= 1_000_000) {
+    scaled = abs / 1_000_000;
+    suffix = "M";
+  } else if (abs >= 1_000) {
+    scaled = abs / 1_000;
+    suffix = "K";
+  }
+  const decimals = scaled >= 100 ? 0 : scaled >= 10 ? 1 : 2;
+  const compact = scaled
+    .toFixed(decimals)
+    .replace(/\.0+$/, "")
+    .replace(/(\.\d*[1-9])0+$/, "$1");
+  return `${value >= 0 ? "+" : "-"}$${compact}${suffix}`;
 }
 
 function getHeatColor(pct) {
@@ -594,10 +614,12 @@ function renderDailyGainLoss(rows) {
 
   totalEl.textContent = fmtCurrency.format(dailyChangeValue);
   totalEl.style.color = dailyChangeValue >= 0 ? "#62d99c" : "#f45b69";
-  metaEl.textContent = `Today: ${fmtPercent.format(dailyChangePct)}`;
+  metaEl.textContent = `Today: ${fmtPercent.format(dailyChangePct)} (since Feb 2026)`;
   metaEl.style.color = dailyChangeValue >= 0 ? "#62d99c" : "#f45b69";
 
-  const history = upsertTodayDailyPL(dailyChangeValue, dailyChangePct);
+  const history = upsertTodayDailyPL(dailyChangeValue, dailyChangePct).filter(
+    (item) => item.date >= DAILY_CALENDAR_START_ISO
+  );
   const plMap = new Map(history.map((item) => [item.date, item.pl]));
   const lastDate = history.length ? parseIsoDate(history[history.length - 1].date) : null;
   monthsEl.innerHTML = "";
@@ -614,12 +636,18 @@ function renderDailyGainLoss(rows) {
   const maxAbs = Array.from(plMap.values()).reduce((best, value) => {
     return Math.max(best, Math.abs(value));
   }, 0);
+  const calendarStart = parseIsoDate(DAILY_CALENDAR_START_ISO);
   const anchorDate = lastDate || new Date();
-  const monthsToShow = 3;
+  const anchorMonth = new Date(anchorDate.getFullYear(), anchorDate.getMonth(), 1);
+  const monthCursor = new Date(calendarStart.getFullYear(), calendarStart.getMonth(), 1);
+  const monthStarts = [];
+  while (monthCursor <= anchorMonth) {
+    monthStarts.push(new Date(monthCursor));
+    monthCursor.setMonth(monthCursor.getMonth() + 1);
+  }
   const weekdayLabels = ["S", "M", "T", "W", "T", "F", "S"];
 
-  for (let offset = monthsToShow - 1; offset >= 0; offset -= 1) {
-    const monthDate = new Date(anchorDate.getFullYear(), anchorDate.getMonth() - offset, 1);
+  monthStarts.forEach((monthDate) => {
     const monthCard = document.createElement("div");
     monthCard.className = "daily-month-card";
 
@@ -658,9 +686,13 @@ function renderDailyGainLoss(rows) {
       const pl = plMap.get(key);
       const cell = document.createElement("div");
       cell.className = `daily-cell${Number.isFinite(pl) ? " data" : " nodata"}`;
-      cell.textContent = String(dayNum);
+      cell.innerHTML = `<span class="daily-cell-day">${dayNum}</span>`;
       if (Number.isFinite(pl)) {
         cell.style.backgroundColor = getCalendarCellColor(pl, maxAbs);
+        const amount = document.createElement("span");
+        amount.className = "daily-cell-amount";
+        amount.textContent = formatDailyCellAmount(pl);
+        cell.appendChild(amount);
         const signed = pl >= 0 ? `+${fmtCurrency.format(pl)}` : fmtCurrency.format(pl);
         cell.title = `${dayDate.toLocaleDateString("en-US")}: ${signed}`;
       } else {
@@ -677,7 +709,7 @@ function renderDailyGainLoss(rows) {
 
     monthCard.appendChild(grid);
     monthsEl.appendChild(monthCard);
-  }
+  });
 }
 
 function renderSummary(rows) {
