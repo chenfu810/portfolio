@@ -661,6 +661,81 @@ function getSizeClass(area) {
   return "size-xs";
 }
 
+function getTreemapTitleFontSize(area) {
+  if (area > 140000) return 22;
+  if (area > 90000) return 18;
+  if (area > 45000) return 15;
+  if (area > 18000) return 12;
+  return 11;
+}
+
+function getTreemapTextMode(item, rect) {
+  const width = rect.width;
+  const height = rect.height;
+  const area = width * height;
+  const ticker = (item.name || "").toString();
+  const titleChars = Math.max(1, ticker.length);
+
+  const compactPad = 6;
+  const compactFont = 11;
+  const compactInnerW = width - compactPad * 2;
+  const compactInnerH = height - compactPad * 2;
+  const compactNeedW = Math.ceil(titleChars * compactFont * 0.62);
+  const compactNeedH = Math.ceil(compactFont * 1.25);
+  const tickerFits = compactInnerW >= compactNeedW && compactInnerH >= compactNeedH;
+  if (!tickerFits) {
+    return "hide";
+  }
+
+  const fullPad = area > 140000 ? 18 : 12;
+  const titleFont = getTreemapTitleFontSize(area);
+  const metaFont = area > 90000 ? 12 : 11;
+  const fullInnerW = width - fullPad * 2;
+  const fullInnerH = height - fullPad * 2;
+  const fullNeedW = Math.max(Math.ceil(titleChars * titleFont * 0.62), 72);
+  const fullNeedH =
+    Math.ceil(titleFont * 1.25) + 6 + Math.ceil(metaFont * 1.35) + 6 + Math.ceil(metaFont * 1.35);
+
+  if (fullInnerW >= fullNeedW && fullInnerH >= fullNeedH) {
+    return "full";
+  }
+  return "ticker";
+}
+
+function layoutTreemapVisibleItems(items, width, height) {
+  const seed = items.map((item) => ({
+    name: item.name,
+    value: item.value,
+    dailyPct: item.dailyPct,
+  }));
+  let current = seed;
+  let rects = [];
+
+  for (let pass = 0; pass < 4 && current.length; pass += 1) {
+    rects = layoutTreemapRectangles(current, 0, 0, width, height).filter(
+      (item) => item.rect.width > 0 && item.rect.height > 0
+    );
+    const visible = rects
+      .map((item) => ({ item, mode: getTreemapTextMode(item, item.rect) }))
+      .filter((entry) => entry.mode !== "hide")
+      .map((entry) => entry.item);
+
+    if (!visible.length) {
+      return { rects: [], hiddenCount: items.length };
+    }
+    if (visible.length === rects.length) {
+      return { rects: visible, hiddenCount: Math.max(0, items.length - visible.length) };
+    }
+    current = visible.map((item) => ({
+      name: item.name,
+      value: item.value,
+      dailyPct: item.dailyPct,
+    }));
+  }
+
+  return { rects, hiddenCount: Math.max(0, items.length - rects.length) };
+}
+
 function getSortedRows(rows) {
   const sorted = rows.slice();
   if (holdingsSortMode === "daily") {
@@ -824,14 +899,27 @@ function renderTreemap(rows) {
 
   const width = Math.max(1, Math.round(treemap.clientWidth));
   const height = Math.max(1, Math.round(treemap.clientHeight));
-  const rects = layoutTreemapRectangles(items, 0, 0, width, height);
+  const { rects, hiddenCount } = layoutTreemapVisibleItems(items, width, height);
+  if (!rects.length) {
+    breadcrumb.textContent = "No tiles fit this viewport";
+    return;
+  }
+  if (hiddenCount > 0) {
+    breadcrumb.textContent = `Visible Stocks (${rects.length} of ${items.length})`;
+  }
 
   rects
-    .filter((item) => item.rect.width > 0 && item.rect.height > 0)
     .forEach((item) => {
+      const textMode = getTreemapTextMode(item, item.rect);
+      if (textMode === "hide") {
+        return;
+      }
       const block = document.createElement("div");
       const area = item.rect.width * item.rect.height;
       block.className = `treemap-block ${getSizeClass(area)} leaf`;
+      if (textMode === "ticker") {
+        block.classList.add("ticker-only");
+      }
       block.style.left = `${item.rect.x}px`;
       block.style.top = `${item.rect.y}px`;
       block.style.width = `${item.rect.width}px`;
@@ -843,13 +931,22 @@ function renderTreemap(rows) {
 
       const pct = formatSignedPercent(item.dailyPct || 0);
       const weight = totalValue > 0 ? (item.value || 0) / totalValue : 0;
-      block.innerHTML = `
-        <div>
-          <div class="title">${item.name}</div>
-          <div class="meta pct">${pct}</div>
-          <div class="meta weight">${fmtPercent.format(weight)} of total</div>
-        </div>
-      `;
+      if (textMode === "full") {
+        block.innerHTML = `
+          <div>
+            <div class="title">${item.name}</div>
+            <div class="meta pct">${pct}</div>
+            <div class="meta weight">${fmtPercent.format(weight)} of total</div>
+          </div>
+        `;
+      } else {
+        block.innerHTML = `
+          <div>
+            <div class="title">${item.name}</div>
+          </div>
+        `;
+      }
+      block.title = `${item.name}: ${pct}, ${fmtPercent.format(weight)} of total`;
 
       treemap.appendChild(block);
     });

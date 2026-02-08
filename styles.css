@@ -245,6 +245,17 @@ h3 {
   display: none;
 }
 
+.treemap-block.ticker-only {
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+}
+
+.treemap-block.ticker-only .title {
+  font-size: 11px;
+  text-align: center;
+}
+
 .treemap-block.leaf {
   cursor: default;
 }
