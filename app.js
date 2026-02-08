@@ -842,13 +842,11 @@ function renderTreemap(rows) {
       block.style.borderColor = heat.border;
 
       const pct = formatSignedPercent(item.dailyPct || 0);
-      const value = fmtCurrency.format(item.value || 0);
       const weight = totalValue > 0 ? (item.value || 0) / totalValue : 0;
       block.innerHTML = `
         <div>
           <div class="title">${item.name}</div>
           <div class="meta pct">${pct}</div>
-          <div class="meta value">${value}</div>
           <div class="meta weight">${fmtPercent.format(weight)} of total</div>
         </div>
       `;
