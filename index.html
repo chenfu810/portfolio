@@ -10,7 +10,7 @@
       href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Space+Grotesk:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20260208-15" />
+    <link rel="stylesheet" href="styles.css?v=20260208-16" />
     <link rel="icon" href="favicon.svg" type="image/svg+xml" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   </head>
@@ -163,23 +163,6 @@
         </div>
       </section>
 
-      <section class="panel contributors-panel">
-        <div class="panel-header">
-          <h3>Top Contributors Today</h3>
-          <p id="contributorsMeta" class="subtle">Contribution = value x daily %.</p>
-        </div>
-        <div class="contributors-grid">
-          <div class="contributors-col">
-            <h4 class="contributors-title">Gainers</h4>
-            <ul id="contributorsGainers" class="contributors-list"></ul>
-          </div>
-          <div class="contributors-col">
-            <h4 class="contributors-title">Losers</h4>
-            <ul id="contributorsLosers" class="contributors-list"></ul>
-          </div>
-        </div>
-      </section>
-
       <section class="panel">
         <div class="panel-header">
           <h3>Expert Advice</h3>
@@ -268,9 +251,9 @@
         <div class="panel-header">
           <h3>Holdings</h3>
           <div class="sort-wrap" id="holdingsSortToggle" role="group" aria-label="Sort holdings">
-            <span class="sort-label">Sort by</span>
-            <button type="button" class="sort-pill active" data-sort="value">Value</button>
-            <button type="button" class="sort-pill" data-sort="daily">Daily %</button>
+            <span class="sort-label">Daily Value Change</span>
+            <button type="button" class="sort-pill active" data-sort="dailyValueDesc">Desc</button>
+            <button type="button" class="sort-pill" data-sort="dailyValueAsc">Asc</button>
           </div>
         </div>
         <div class="table-wrap">
@@ -281,6 +264,7 @@
                 <th>Shares</th>
                 <th>Price</th>
                 <th>Daily %</th>
+                <th>Daily Value Change</th>
                 <th>Value</th>
               </tr>
             </thead>
@@ -297,6 +281,6 @@
       </section>
     </main>
 
-    <script src="app.js?v=20260208-21"></script>
+    <script src="app.js?v=20260208-22"></script>
   </body>
 </html>

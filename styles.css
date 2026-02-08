@@ -771,42 +771,6 @@ h1 {
   text-transform: uppercase;
 }
 
-.contributors-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: var(--space-2);
-}
-
-.contributors-col {
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.02);
-  padding: var(--space-2);
-}
-
-.contributors-title {
-  font-size: 12px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--muted);
-  margin-bottom: 10px;
-}
-
-.contributors-list {
-  list-style: none;
-  display: grid;
-  gap: 10px;
-}
-
-.contributor-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: var(--space-1);
-  font-size: 13px;
-  line-height: 1.25;
-}
-
 .table-wrap {
   overflow-x: auto;
 }

@@ -29,7 +29,7 @@ const fmtPercent = new Intl.NumberFormat("en-US", {
 let historyChart;
 let liveRows = [];
 let liveUpdateScheduled = false;
-let holdingsSortMode = "value";
+let holdingsSortMode = "dailyValueDesc";
 let currentRows = [];
 let currentNewsItems = [];
 let newsIsLoading = false;
@@ -1075,16 +1075,13 @@ function layoutTreemapVisibleItems(items, width, height) {
 
 function getSortedRows(rows) {
   const sorted = rows.slice();
-  if (holdingsSortMode === "daily") {
-    sorted.sort((a, b) => {
-      if (b.dailyPct !== a.dailyPct) {
-        return b.dailyPct - a.dailyPct;
-      }
-      return b.value - a.value;
-    });
-    return sorted;
-  }
+  const direction = holdingsSortMode === "dailyValueAsc" ? 1 : -1;
   sorted.sort((a, b) => {
+    const aDelta = a.value * a.dailyPct;
+    const bDelta = b.value * b.dailyPct;
+    if (aDelta !== bDelta) {
+      return (aDelta - bDelta) * direction;
+    }
     if (b.value !== a.value) {
       return b.value - a.value;
     }
@@ -1114,6 +1111,8 @@ function renderTable(rows) {
       : ticker;
     const priceDisplay = row.price ? fmtCurrency.format(row.price) : "—";
     const valueDisplay = row.value ? fmtCurrency.format(row.value) : "—";
+    const dailyValueChange = row.value * row.dailyPct;
+    const dailyValueChangeDisplay = formatSignedCurrency(dailyValueChange);
     tr.innerHTML = `
       <td>${tickerCell}</td>
       <td>${row.shares.toLocaleString()}</td>
@@ -1121,6 +1120,7 @@ function renderTable(rows) {
       <td class="${row.dailyPct >= 0 ? "pos" : "neg"}">
         ${formatSignedPercent(row.dailyPct)}
       </td>
+      <td class="${dailyValueChange > 0 ? "pos" : dailyValueChange < 0 ? "neg" : ""}">${dailyValueChangeDisplay}</td>
       <td>${valueDisplay}</td>
     `;
     tbody.appendChild(tr);
@@ -1183,65 +1183,6 @@ function renderSnapshotStrip(rows) {
   );
   setSnapshotMetric("snapshotCashPct", fmtPercent.format(exposure.cashPct));
   setSnapshotMetric("snapshotCryptoPct", fmtPercent.format(exposure.cryptoPct));
-}
-
-function renderTopContributors(rows) {
-  const gainersEl = document.getElementById("contributorsGainers");
-  const losersEl = document.getElementById("contributorsLosers");
-  const metaEl = document.getElementById("contributorsMeta");
-  if (!gainersEl || !losersEl || !metaEl) {
-    return;
-  }
-
-  const contributions = rows
-    .filter((row) => row.ticker && Number.isFinite(row.value) && Number.isFinite(row.dailyPct))
-    .map((row) => ({
-      ticker: row.ticker.toUpperCase(),
-      contribution: row.value * row.dailyPct,
-      dailyPct: row.dailyPct,
-    }));
-  const gainers = contributions
-    .filter((row) => row.contribution > 0)
-    .sort((a, b) => b.contribution - a.contribution)
-    .slice(0, 4);
-  const losers = contributions
-    .filter((row) => row.contribution < 0)
-    .sort((a, b) => a.contribution - b.contribution)
-    .slice(0, 4);
-
-  function renderList(target, list, emptyText) {
-    target.innerHTML = "";
-    if (!list.length) {
-      const empty = document.createElement("li");
-      empty.className = "empty";
-      empty.textContent = emptyText;
-      target.appendChild(empty);
-      return;
-    }
-    list.forEach((row) => {
-      const item = document.createElement("li");
-      item.className = "contributor-item";
-      const url = getRobinhoodStockUrl(row.ticker);
-      const ticker = url
-        ? `<a class="ticker-link" href="${url}" target="_blank" rel="noopener noreferrer">${row.ticker}</a>`
-        : row.ticker;
-      item.innerHTML = `
-        <span>${ticker}</span>
-        <span class="${row.contribution >= 0 ? "pos" : "neg"}">${formatSignedCurrency(
-        row.contribution
-      )} (${formatSignedPercent(row.dailyPct)})</span>
-      `;
-      target.appendChild(item);
-    });
-  }
-
-  renderList(gainersEl, gainers, "No positive contributors yet. Try Refresh after market updates.");
-  renderList(losersEl, losers, "No negative contributors yet. This side updates when holdings are down.");
-
-  const totalContribution = contributions.reduce((sum, row) => sum + row.contribution, 0);
-  metaEl.textContent = `Contribution = value x daily %. Net today: ${formatSignedCurrency(
-    totalContribution
-  )}.`;
 }
 
 function renderAllocationExposure(rows) {
@@ -1433,7 +1374,6 @@ function scheduleLiveRender() {
     renderSnapshotStrip(liveRows);
     renderSummary(liveRows);
     renderDailyGainLoss(liveRows);
-    renderTopContributors(liveRows);
     renderTable(liveRows);
     renderTreemap(liveRows);
     renderBenchmarkContext();
@@ -1767,7 +1707,6 @@ async function loadData() {
   renderSnapshotStrip(rows);
   renderSummary(rows);
   renderDailyGainLoss(rows);
-  renderTopContributors(rows);
   renderTable(rows);
   renderTreemap(rows);
   renderBenchmarkContext();
@@ -1820,7 +1759,7 @@ document.getElementById("holdingsSortToggle").addEventListener("click", (event) 
   if (!button) {
     return;
   }
-  holdingsSortMode = button.dataset.sort === "daily" ? "daily" : "value";
+  holdingsSortMode = button.dataset.sort === "dailyValueAsc" ? "dailyValueAsc" : "dailyValueDesc";
   document.querySelectorAll("#holdingsSortToggle .sort-pill").forEach((pill) => {
     pill.classList.toggle("active", pill === button);
   });
