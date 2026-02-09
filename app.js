@@ -2,6 +2,10 @@ const SHEET_CSV_URL =
   "https://docs.google.com/spreadsheets/d/1YYl_8P_HehmfZzRGa7q-zWvNEiI22JrduPkTFXJ-1D4/export?format=csv&gid=0";
 
 const HISTORY_CSV_URL = "";
+// Optional shared history endpoint (e.g. Google Apps Script web app).
+// Set both to make daily history and return snapshots laptop-agnostic.
+const HISTORY_SYNC_URL = "";
+const HISTORY_SYNC_TOKEN = "";
 
 const FMP_API_KEY = "";
 const FMP_QUOTE_BASE = "https://financialmodelingprep.com/stable/batch-quote";
@@ -40,6 +44,8 @@ let pricesLastUpdatedAt = null;
 let newsLastUpdatedAt = null;
 let priceMode = "regular";
 let lastRecordedSignature = "";
+let historySyncInFlight = false;
+let historySyncPending = false;
 
 const DAILY_PL_STORAGE_KEY = "portfolio_pulse_daily_pl_v1";
 const DAILY_PL_HISTORY_LIMIT = 400;
@@ -327,39 +333,7 @@ function loadStoredPortfolioHistory() {
       return [];
     }
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-    return parsed
-      .map((item) => {
-        const positions = {};
-        const sourcePositions =
-          item?.positions && typeof item.positions === "object" ? item.positions : {};
-        Object.entries(sourcePositions).forEach(([ticker, position]) => {
-          const symbol = (ticker || "").toString().trim().toUpperCase();
-          if (!symbol) {
-            return;
-          }
-          positions[symbol] = {
-            shares: Number(position?.shares),
-            price: Number(position?.price),
-            value: Number(position?.value),
-            isCash: Boolean(position?.isCash),
-            isCrypto: Boolean(position?.isCrypto),
-            sector: (position?.sector || "Unknown").toString().trim() || "Unknown",
-          };
-        });
-        return {
-          date: typeof item?.date === "string" ? item.date : "",
-          totalValue: Number(item?.totalValue),
-          positions,
-        };
-      })
-      .filter(
-        (item) => parseIsoDate(item.date) && Number.isFinite(item.totalValue) && item.totalValue > 0
-      )
-      .sort((a, b) => a.date.localeCompare(b.date))
-      .slice(-PORTFOLIO_HISTORY_LIMIT);
+    return normalizePortfolioHistoryEntries(parsed);
   } catch (err) {
     return [];
   }
@@ -635,6 +609,7 @@ function persistDailyRecords(rows) {
   upsertTodayPortfolioSnapshot(regularRows, totalValue);
   upsertTodayDailyPL(dailyChangeValue, dailyChangePct);
   lastRecordedSignature = signature;
+  queueSharedHistorySync();
   return true;
 }
 
@@ -665,6 +640,189 @@ function parseIsoDate(value) {
   const parsed = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
   parsed.setHours(0, 0, 0, 0);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function isHistorySyncEnabled() {
+  return Boolean((HISTORY_SYNC_URL || "").toString().trim());
+}
+
+function normalizePortfolioHistoryEntries(entries) {
+  if (!Array.isArray(entries)) {
+    return [];
+  }
+  return entries
+    .map((item) => {
+      const positions = {};
+      const sourcePositions =
+        item?.positions && typeof item.positions === "object" ? item.positions : {};
+      Object.entries(sourcePositions).forEach(([ticker, position]) => {
+        const symbol = (ticker || "").toString().trim().toUpperCase();
+        if (!symbol) {
+          return;
+        }
+        positions[symbol] = {
+          shares: Number(position?.shares),
+          price: Number(position?.price),
+          value: Number(position?.value),
+          isCash: Boolean(position?.isCash),
+          isCrypto: Boolean(position?.isCrypto),
+          sector: (position?.sector || "Unknown").toString().trim() || "Unknown",
+        };
+      });
+      return {
+        date: typeof item?.date === "string" ? item.date : "",
+        totalValue: Number(item?.totalValue),
+        positions,
+      };
+    })
+    .filter(
+      (item) => parseIsoDate(item.date) && Number.isFinite(item.totalValue) && item.totalValue > 0
+    )
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(-PORTFOLIO_HISTORY_LIMIT);
+}
+
+function normalizeDailyHistoryEntries(entries) {
+  if (!Array.isArray(entries)) {
+    return [];
+  }
+  return entries
+    .map((item) => ({
+      date: typeof item?.date === "string" ? item.date : "",
+      pl: Number(item?.pl),
+      pct: Number(item?.pct),
+    }))
+    .filter((item) => parseIsoDate(item.date) && Number.isFinite(item.pl))
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(-DAILY_PL_HISTORY_LIMIT);
+}
+
+function choosePortfolioEntryByRichness(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  const aCount = Object.keys(a.positions || {}).length;
+  const bCount = Object.keys(b.positions || {}).length;
+  if (bCount !== aCount) {
+    return bCount > aCount ? b : a;
+  }
+  if (Number.isFinite(a.totalValue) && Number.isFinite(b.totalValue)) {
+    return Math.abs(b.totalValue) > Math.abs(a.totalValue) ? b : a;
+  }
+  return b;
+}
+
+function mergePortfolioHistory(localHistory, remoteHistory) {
+  const merged = new Map();
+  normalizePortfolioHistoryEntries(localHistory).forEach((entry) => {
+    merged.set(entry.date, entry);
+  });
+  normalizePortfolioHistoryEntries(remoteHistory).forEach((entry) => {
+    merged.set(entry.date, choosePortfolioEntryByRichness(merged.get(entry.date), entry));
+  });
+  return Array.from(merged.values())
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(-PORTFOLIO_HISTORY_LIMIT);
+}
+
+function mergeDailyHistory(localHistory, remoteHistory) {
+  const merged = new Map();
+  normalizeDailyHistoryEntries(localHistory).forEach((entry) => {
+    merged.set(entry.date, entry);
+  });
+  normalizeDailyHistoryEntries(remoteHistory).forEach((entry) => {
+    merged.set(entry.date, entry);
+  });
+  return Array.from(merged.values())
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(-DAILY_PL_HISTORY_LIMIT);
+}
+
+function parseRemoteHistoryPayload(payload) {
+  const root = payload?.data || payload || {};
+  const portfolioRaw =
+    root?.portfolioHistory || root?.portfolio || root?.snapshots || [];
+  const dailyRaw =
+    root?.dailyHistory || root?.dailyPLHistory || root?.daily || [];
+  return {
+    portfolioHistory: normalizePortfolioHistoryEntries(portfolioRaw),
+    dailyHistory: normalizeDailyHistoryEntries(dailyRaw),
+  };
+}
+
+async function fetchRemoteHistoryPayload() {
+  if (!isHistorySyncEnabled()) {
+    return null;
+  }
+  try {
+    const url = new URL(HISTORY_SYNC_URL);
+    url.searchParams.set("mode", "read");
+    if (HISTORY_SYNC_TOKEN) {
+      url.searchParams.set("token", HISTORY_SYNC_TOKEN);
+    }
+    const response = await fetch(url.toString());
+    if (!response.ok) {
+      return null;
+    }
+    const payload = await response.json();
+    return parseRemoteHistoryPayload(payload);
+  } catch (err) {
+    return null;
+  }
+}
+
+async function hydrateSharedHistory() {
+  if (!isHistorySyncEnabled()) {
+    return;
+  }
+  const remote = await fetchRemoteHistoryPayload();
+  if (!remote) {
+    return;
+  }
+  const mergedPortfolio = mergePortfolioHistory(
+    loadStoredPortfolioHistory(),
+    remote.portfolioHistory
+  );
+  const mergedDaily = mergeDailyHistory(loadStoredDailyPLHistory(), remote.dailyHistory);
+  saveStoredPortfolioHistory(mergedPortfolio);
+  saveStoredDailyPLHistory(mergedDaily);
+}
+
+async function pushSharedHistoryNow() {
+  if (!isHistorySyncEnabled()) {
+    return;
+  }
+  try {
+    await fetch(HISTORY_SYNC_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mode: "write",
+        token: HISTORY_SYNC_TOKEN || undefined,
+        portfolioHistory: loadStoredPortfolioHistory(),
+        dailyHistory: loadStoredDailyPLHistory(),
+      }),
+    });
+  } catch (err) {
+    // Ignore sync failures; local history remains available.
+  }
+}
+
+function queueSharedHistorySync() {
+  if (!isHistorySyncEnabled()) {
+    return;
+  }
+  if (historySyncInFlight) {
+    historySyncPending = true;
+    return;
+  }
+  historySyncInFlight = true;
+  (async () => {
+    do {
+      historySyncPending = false;
+      await pushSharedHistoryNow();
+    } while (historySyncPending);
+    historySyncInFlight = false;
+  })();
 }
 
 function formatRelativeAge(updatedAt) {
@@ -726,18 +884,7 @@ function loadStoredDailyPLHistory() {
       return [];
     }
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-    return parsed
-      .map((item) => ({
-        date: typeof item?.date === "string" ? item.date : "",
-        pl: Number(item?.pl),
-        pct: Number(item?.pct),
-      }))
-      .filter((item) => parseIsoDate(item.date) && Number.isFinite(item.pl))
-      .sort((a, b) => a.date.localeCompare(b.date))
-      .slice(-DAILY_PL_HISTORY_LIMIT);
+    return normalizeDailyHistoryEntries(parsed);
   } catch (err) {
     return [];
   }
@@ -2313,6 +2460,8 @@ function renderSummary(displayRows, snapshotRows = displayRows) {
 }
 
 async function loadData() {
+  await hydrateSharedHistory();
+
   let csvText = SAMPLE_CSV;
   let sourceLabel = "Sample data";
 
