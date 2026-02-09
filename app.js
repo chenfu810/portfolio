@@ -545,16 +545,16 @@ function getDisplayRows(rows) {
   return rows.map((row) => {
     const regularPrice = getRegularPrice(row);
     const hasExtended =
-      Number.isFinite(row.afterHoursPrice) && Number(row.afterHoursPrice) > 0;
-    const useExtended = priceMode === "extended" && hasExtended;
-    const displayPrice = useExtended ? Number(row.afterHoursPrice) : regularPrice;
+      Number.isFinite(row.afterHoursPrice) && Number(row.afterHoursPrice) > 0 && regularPrice > 0;
+    const displayPrice =
+      priceMode === "extended" && hasExtended ? Number(row.afterHoursPrice) : regularPrice;
+    const extendedDiffPct =
+      hasExtended && regularPrice > 0 ? displayPrice / regularPrice - 1 : null;
+    const extendedDiffValue =
+      hasExtended && regularPrice > 0 ? row.shares * (displayPrice - regularPrice) : 0;
     let displayDailyPct = Number.isFinite(row.dailyPct) ? row.dailyPct : 0;
-    if (useExtended) {
-      if (Number.isFinite(row.extendedPct)) {
-        displayDailyPct = row.extendedPct;
-      } else if (regularPrice > 0) {
-        displayDailyPct = displayPrice / regularPrice - 1;
-      }
+    if (priceMode === "extended") {
+      displayDailyPct = Number.isFinite(extendedDiffPct) ? extendedDiffPct : 0;
     }
     return {
       ...row,
@@ -562,6 +562,9 @@ function getDisplayRows(rows) {
       value: row.shares * displayPrice,
       dailyPct: displayDailyPct,
       regularPrice,
+      hasExtendedPrice: hasExtended,
+      extendedDiffPct,
+      extendedDiffValue,
     };
   });
 }
@@ -871,7 +874,15 @@ function setStatusPill(id, label, updatedAt, freshMinutes, delayedMinutes) {
 }
 
 function renderDataFreshness() {
-  const priceLabel = priceMode === "extended" ? "Prices (extended)" : "Prices (regular)";
+  let priceLabel = "Prices (regular)";
+  if (priceMode === "extended") {
+    const nonCash = currentRows.filter((row) => !row.isCash && row.ticker);
+    const covered = nonCash.filter(
+      (row) => Number.isFinite(row.afterHoursPrice) && Number(row.afterHoursPrice) > 0
+    ).length;
+    const total = nonCash.length;
+    priceLabel = total > 0 ? `Prices (extended ${covered}/${total})` : "Prices (extended)";
+  }
   setStatusPill("statusPrices", priceLabel, pricesLastUpdatedAt, 10, 60);
   setStatusPill("statusBenchmarks", "Benchmarks", benchmarkLastUpdatedAt, 120, 720);
   setStatusPill("statusNews", "News", newsLastUpdatedAt, 45, 240);
@@ -1875,9 +1886,31 @@ function renderTable(rows) {
     const tickerCell = tickerUrl
       ? `<a class="ticker-link" href="${tickerUrl}" target="_blank" rel="noopener noreferrer">${ticker}</a>`
       : ticker;
-    const priceDisplay = row.price ? fmtCurrency.format(row.price) : "—";
+    const priceMain = row.price ? fmtCurrency.format(row.price) : "—";
+    let priceDisplay = priceMain;
+    if (priceMode === "extended") {
+      const regularText = row.regularPrice ? fmtCurrency.format(row.regularPrice) : "—";
+      if (row.hasExtendedPrice && Number.isFinite(row.extendedDiffPct)) {
+        const diffClass =
+          row.extendedDiffPct > 0 ? "pos" : row.extendedDiffPct < 0 ? "neg" : "";
+        priceDisplay = `
+          <div class="price-main">${priceMain}</div>
+          <div class="price-sub ${diffClass}">Reg ${regularText} · ${formatSignedPercent(
+          row.extendedDiffPct
+        )}</div>
+        `;
+      } else {
+        priceDisplay = `
+          <div class="price-main">${priceMain}</div>
+          <div class="price-sub muted">Reg ${regularText} · no extended quote</div>
+        `;
+      }
+    }
     const valueDisplay = row.value ? fmtCurrency.format(row.value) : "—";
-    const dailyValueChange = row.value * row.dailyPct;
+    const dailyValueChange =
+      priceMode === "extended"
+        ? Number(row.extendedDiffValue) || 0
+        : row.value * row.dailyPct;
     const dailyValueChangeDisplay = formatSignedCurrency(dailyValueChange);
     tr.innerHTML = `
       <td>${tickerCell}</td>
@@ -2413,11 +2446,18 @@ function renderDailyGainLoss(rows) {
 
 function renderSummary(displayRows, snapshotRows = displayRows) {
   const totalValue = displayRows.reduce((sum, row) => sum + row.value, 0);
-  const dailyChangeValue = displayRows.reduce(
+  const regularTotalValue = snapshotRows.reduce((sum, row) => sum + row.value, 0);
+  const regularDailyChangeValue = snapshotRows.reduce(
     (sum, row) => sum + row.value * row.dailyPct,
     0
   );
-  const dailyChangePct = totalValue ? dailyChangeValue / totalValue : 0;
+  const regularDailyChangePct = regularTotalValue ? regularDailyChangeValue / regularTotalValue : 0;
+  let dailyChangeValue = displayRows.reduce((sum, row) => sum + row.value * row.dailyPct, 0);
+  let dailyChangePct = totalValue ? dailyChangeValue / totalValue : 0;
+  if (priceMode === "extended") {
+    dailyChangeValue = totalValue - regularTotalValue;
+    dailyChangePct = regularTotalValue ? dailyChangeValue / regularTotalValue : 0;
+  }
   let snapshots = loadStoredPortfolioHistory();
   const todayIso = toIsoLocal(new Date());
   if (!snapshots.some((entry) => entry.date === todayIso)) {
@@ -2430,13 +2470,19 @@ function renderSummary(displayRows, snapshotRows = displayRows) {
     snapshots.sort((a, b) => a.date.localeCompare(b.date));
   }
   const performanceSeries = buildPortfolioPerformanceSeries(snapshots);
-  latestPortfolioReturns = computePortfolioReturnsFromSeries(performanceSeries, dailyChangePct);
+  latestPortfolioReturns = computePortfolioReturnsFromSeries(
+    performanceSeries,
+    regularDailyChangePct
+  );
   const exposure = getPortfolioExposure(displayRows);
 
   document.getElementById("totalValue").textContent = fmtCurrency.format(totalValue);
-  document.getElementById("dailyChange").textContent = `${formatSignedPercent(
-    dailyChangePct
-  )} today (${fmtCurrency.format(dailyChangeValue)})`;
+  document.getElementById("dailyChange").textContent =
+    priceMode === "extended"
+      ? `${formatSignedPercent(dailyChangePct)} vs regular (${formatSignedCurrency(
+          dailyChangeValue
+        )})`
+      : `${formatSignedPercent(dailyChangePct)} today (${fmtCurrency.format(dailyChangeValue)})`;
   document.getElementById("dailyChange").style.color =
     dailyChangeValue >= 0 ? "#62d99c" : "#f45b69";
 

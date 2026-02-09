@@ -987,6 +987,23 @@ tbody tr:hover {
   text-decoration: underline;
 }
 
+.price-main {
+  font-weight: 600;
+  line-height: 1.1;
+}
+
+.price-sub {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.25;
+  color: #9fb0cf;
+  white-space: nowrap;
+}
+
+.price-sub.muted {
+  color: #8b9ab7;
+}
+
 .mono {
   font-family: "Space Grotesk", sans-serif;
   font-weight: 600;
