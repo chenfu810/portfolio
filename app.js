@@ -39,6 +39,7 @@ let dailyHistoryExpanded = false;
 let pricesLastUpdatedAt = null;
 let newsLastUpdatedAt = null;
 let priceMode = "regular";
+let lastRecordedSignature = "";
 
 const DAILY_PL_STORAGE_KEY = "portfolio_pulse_daily_pl_v1";
 const DAILY_PL_HISTORY_LIMIT = 400;
@@ -601,6 +602,40 @@ function getRegularRows(rows) {
       regularPrice,
     };
   });
+}
+
+function buildMarketRecordSignature(rows) {
+  const normalized = rows
+    .map((row) => ({
+      ticker: (row.ticker || "").toString().trim().toUpperCase(),
+      shares: Number(row.shares) || 0,
+      price: getRegularPrice(row),
+      dailyPct: Number.isFinite(row.dailyPct) ? row.dailyPct : 0,
+    }))
+    .sort((a, b) => a.ticker.localeCompare(b.ticker));
+  return normalized
+    .map(
+      (row) =>
+        `${row.ticker}:${row.shares.toFixed(6)}:${row.price.toFixed(6)}:${row.dailyPct.toFixed(6)}`
+    )
+    .join("|");
+}
+
+function persistDailyRecords(rows) {
+  const regularRows = getRegularRows(rows);
+  const totalValue = regularRows.reduce((sum, row) => sum + row.value, 0);
+  const dailyChangeValue = regularRows.reduce((sum, row) => sum + row.value * row.dailyPct, 0);
+  const dailyChangePct = totalValue > 0 ? dailyChangeValue / totalValue : 0;
+  const signature = `${toIsoLocal(new Date())}|${buildMarketRecordSignature(
+    regularRows
+  )}|${totalValue.toFixed(4)}|${dailyChangeValue.toFixed(4)}`;
+  if (signature === lastRecordedSignature) {
+    return false;
+  }
+  upsertTodayPortfolioSnapshot(regularRows, totalValue);
+  upsertTodayDailyPL(dailyChangeValue, dailyChangePct);
+  lastRecordedSignature = signature;
+  return true;
 }
 
 function setDailyHistoryExpanded(expanded) {
@@ -1967,6 +2002,7 @@ function scheduleLiveRender() {
     currentRows = liveRows;
     const displayRows = getDisplayRows(liveRows);
     const regularRows = getRegularRows(liveRows);
+    persistDailyRecords(regularRows);
     renderSummary(displayRows, regularRows);
     renderDailyGainLoss(displayRows);
     renderTable(displayRows);
@@ -2133,7 +2169,7 @@ function renderDailyGainLoss(rows) {
   metaEl.textContent = `Today: ${formatSignedPercent(dailyChangePct)} (since Feb 2026)`;
   metaEl.style.color = dailyChangeValue >= 0 ? "#62d99c" : "#f45b69";
 
-  const history = upsertTodayDailyPL(dailyChangeValue, dailyChangePct).filter(
+  const history = loadStoredDailyPLHistory().filter(
     (item) => item.date >= DAILY_CALENDAR_START_ISO
   );
   const plMap = new Map(history.map((item) => [item.date, item.pl]));
@@ -2235,8 +2271,17 @@ function renderSummary(displayRows, snapshotRows = displayRows) {
     0
   );
   const dailyChangePct = totalValue ? dailyChangeValue / totalValue : 0;
-  const snapshotTotal = snapshotRows.reduce((sum, row) => sum + row.value, 0);
-  const snapshots = upsertTodayPortfolioSnapshot(snapshotRows, snapshotTotal);
+  let snapshots = loadStoredPortfolioHistory();
+  const todayIso = toIsoLocal(new Date());
+  if (!snapshots.some((entry) => entry.date === todayIso)) {
+    const snapshotTotal = snapshotRows.reduce((sum, row) => sum + row.value, 0);
+    snapshots = snapshots.concat({
+      date: todayIso,
+      totalValue: snapshotTotal,
+      positions: buildSnapshotPositions(snapshotRows),
+    });
+    snapshots.sort((a, b) => a.date.localeCompare(b.date));
+  }
   const performanceSeries = buildPortfolioPerformanceSeries(snapshots);
   latestPortfolioReturns = computePortfolioReturnsFromSeries(performanceSeries, dailyChangePct);
   const exposure = getPortfolioExposure(displayRows);
@@ -2303,6 +2348,7 @@ async function loadData() {
   pricesLastUpdatedAt = hasSheetPrices ? new Date() : null;
   const displayRows = getDisplayRows(rows);
   const regularRows = getRegularRows(rows);
+  persistDailyRecords(regularRows);
   renderSummary(displayRows, regularRows);
   renderDailyGainLoss(displayRows);
   renderTable(displayRows);
