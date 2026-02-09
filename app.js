@@ -11,6 +11,8 @@ const FMP_API_KEY = "";
 const FMP_QUOTE_BASE = "https://financialmodelingprep.com/stable/batch-quote";
 const LIVE_PRICE_REFRESH_MS = 60_000;
 const LIVE_PRICE_MAX_BACKOFF_MS = 5 * 60_000;
+const EXTENDED_QUOTE_MAX_AGE_MINUTES = 35;
+const EASTERN_TIMEZONE = "America/New_York";
 
 const SAMPLE_CSV = `ticket,shares,price,daily change %
 NVDA,100,765.42,1.1%
@@ -246,6 +248,10 @@ function normalizeRow(row) {
     regularPrice: price,
     afterHoursPrice,
     extendedPct: null,
+    extendedAvailable: false,
+    extendedSession: "",
+    extendedQuoteTimeMs: null,
+    extendedReason: "",
     dailyPct,
     value,
     monthPct,
@@ -545,7 +551,10 @@ function getDisplayRows(rows) {
   return rows.map((row) => {
     const regularPrice = getRegularPrice(row);
     const hasExtended =
-      Number.isFinite(row.afterHoursPrice) && Number(row.afterHoursPrice) > 0 && regularPrice > 0;
+      Boolean(row.extendedAvailable) &&
+      Number.isFinite(row.afterHoursPrice) &&
+      Number(row.afterHoursPrice) > 0 &&
+      regularPrice > 0;
     const displayPrice =
       priceMode === "extended" && hasExtended ? Number(row.afterHoursPrice) : regularPrice;
     const extendedDiffPct =
@@ -565,6 +574,9 @@ function getDisplayRows(rows) {
       hasExtendedPrice: hasExtended,
       extendedDiffPct,
       extendedDiffValue,
+      extendedSession: row.extendedSession || "",
+      extendedQuoteTimeMs: row.extendedQuoteTimeMs || null,
+      extendedReason: row.extendedReason || "",
     };
   });
 }
@@ -875,15 +887,26 @@ function setStatusPill(id, label, updatedAt, freshMinutes, delayedMinutes) {
 
 function renderDataFreshness() {
   let priceLabel = "Prices (regular)";
+  let extendedCovered = 0;
+  let extendedTotal = 0;
   if (priceMode === "extended") {
-    const nonCash = currentRows.filter((row) => !row.isCash && row.ticker);
-    const covered = nonCash.filter(
-      (row) => Number.isFinite(row.afterHoursPrice) && Number(row.afterHoursPrice) > 0
-    ).length;
-    const total = nonCash.length;
-    priceLabel = total > 0 ? `Prices (extended ${covered}/${total})` : "Prices (extended)";
+    const stocks = currentRows.filter((row) => !row.isCash && !row.isCrypto && row.ticker);
+    extendedCovered = stocks.filter((row) => Boolean(row.extendedAvailable)).length;
+    extendedTotal = stocks.length;
+    priceLabel =
+      extendedTotal > 0
+        ? `Prices (extended verified ${extendedCovered}/${extendedTotal})`
+        : "Prices (extended verified)";
   }
   setStatusPill("statusPrices", priceLabel, pricesLastUpdatedAt, 10, 60);
+  if (priceMode === "extended" && extendedTotal > 0 && extendedCovered === 0) {
+    const pill = document.getElementById("statusPrices");
+    if (pill) {
+      pill.classList.remove("fresh", "delayed");
+      pill.classList.add("stale");
+      pill.textContent = `Prices (extended verified 0/${extendedTotal}): unavailable now`;
+    }
+  }
   setStatusPill("statusBenchmarks", "Benchmarks", benchmarkLastUpdatedAt, 120, 720);
   setStatusPill("statusNews", "News", newsLastUpdatedAt, 45, 240);
 }
@@ -996,6 +1019,117 @@ function buildRssProxyUrl(feedUrl) {
   return `https://api.allorigins.win/raw?url=${encodeURIComponent(feedUrl)}`;
 }
 
+function parseUnixSecondsToMs(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0) {
+    return null;
+  }
+  return Math.round(num * 1000);
+}
+
+function getEasternSessionState(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: EASTERN_TIMEZONE,
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(now);
+
+  const lookup = {};
+  parts.forEach((part) => {
+    if (part.type !== "literal") {
+      lookup[part.type] = part.value;
+    }
+  });
+
+  const weekday = lookup.weekday || "";
+  const hour = Number(lookup.hour || 0) % 24;
+  const minute = Number(lookup.minute || 0);
+  const dayMap = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  const day = dayMap[weekday] ?? 0;
+  const isWeekday = day >= 1 && day <= 5;
+  const mins = hour * 60 + minute;
+
+  return {
+    isWeekday,
+    isPre: isWeekday && mins >= 4 * 60 && mins < 9 * 60 + 30,
+    isRegular: isWeekday && mins >= 9 * 60 + 30 && mins < 16 * 60,
+    isPost: isWeekday && mins >= 16 * 60 && mins < 20 * 60,
+  };
+}
+
+function isFreshExtendedTimestamp(timeMs) {
+  if (!Number.isFinite(timeMs)) {
+    return false;
+  }
+  const ageMs = Date.now() - timeMs;
+  return ageMs >= -5 * 60 * 1000 && ageMs <= EXTENDED_QUOTE_MAX_AGE_MINUTES * 60 * 1000;
+}
+
+function pickExtendedCandidate(quote) {
+  const prePrice = Number(quote.preMarketPrice);
+  const postPrice = Number(quote.postMarketPrice);
+  const preTimeMs = parseUnixSecondsToMs(quote.preMarketTime);
+  const postTimeMs = parseUnixSecondsToMs(quote.postMarketTime);
+  const prePct = Number(quote.preMarketChangePercent);
+  const postPct = Number(quote.postMarketChangePercent);
+
+  const candidates = [];
+  if (Number.isFinite(prePrice) && prePrice > 0 && Number.isFinite(preTimeMs)) {
+    candidates.push({
+      session: "pre",
+      price: prePrice,
+      pct: Number.isFinite(prePct) ? prePct / 100 : null,
+      timeMs: preTimeMs,
+    });
+  }
+  if (Number.isFinite(postPrice) && postPrice > 0 && Number.isFinite(postTimeMs)) {
+    candidates.push({
+      session: "post",
+      price: postPrice,
+      pct: Number.isFinite(postPct) ? postPct / 100 : null,
+      timeMs: postTimeMs,
+    });
+  }
+
+  if (!candidates.length) {
+    return null;
+  }
+  candidates.sort((a, b) => b.timeMs - a.timeMs);
+  return candidates[0];
+}
+
+function validateExtendedCandidate(quote, candidate) {
+  if (!candidate) {
+    return { valid: false, reason: "No pre/post quote returned" };
+  }
+
+  const state = (quote.marketState || "").toString().toUpperCase();
+  const et = getEasternSessionState();
+  const sessionOpen = candidate.session === "post" ? et.isPost : et.isPre;
+  const stateMatches = candidate.session === "post" ? state.includes("POST") : state.includes("PRE");
+  const fresh = isFreshExtendedTimestamp(candidate.timeMs);
+  if (!fresh) {
+    return { valid: false, reason: "Extended quote is stale" };
+  }
+  if (!sessionOpen && !stateMatches) {
+    return { valid: false, reason: "Not in matching extended session" };
+  }
+  return { valid: true, reason: "" };
+}
+
+function formatEtTimeShort(timeMs) {
+  if (!Number.isFinite(timeMs)) {
+    return "";
+  }
+  return new Date(timeMs).toLocaleTimeString("en-US", {
+    timeZone: EASTERN_TIMEZONE,
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 async function fetchJsonWithProxyFallback(url) {
   try {
     const direct = await fetch(url);
@@ -1033,6 +1167,15 @@ async function fetchExtendedHoursQuotes(rows) {
     return false;
   }
 
+  rows.forEach((row) => {
+    row.extendedAvailable = false;
+    row.extendedSession = "";
+    row.extendedQuoteTimeMs = null;
+    row.extendedReason = "No quote fetched yet";
+    row.afterHoursPrice = null;
+    row.extendedPct = null;
+  });
+
   let updatedAny = false;
   const chunks = chunkSymbols(symbols, 40);
   for (const chunk of chunks) {
@@ -1061,29 +1204,28 @@ async function fetchExtendedHoursQuotes(rows) {
         updatedAny = true;
       }
 
-      const postPrice = Number(quote.postMarketPrice);
-      const prePrice = Number(quote.preMarketPrice);
-      const extendedPrice =
-        Number.isFinite(postPrice) && postPrice > 0
-          ? postPrice
-          : Number.isFinite(prePrice) && prePrice > 0
-            ? prePrice
-            : null;
-      if (Number.isFinite(extendedPrice) && extendedPrice > 0) {
-        row.afterHoursPrice = extendedPrice;
-        updatedAny = true;
-      }
-
       const regularPct = Number(quote.regularMarketChangePercent);
       if (Number.isFinite(regularPct)) {
         row.dailyPct = regularPct / 100;
       }
 
-      const postPct = Number(quote.postMarketChangePercent);
-      const prePct = Number(quote.preMarketChangePercent);
-      const extendedPct =
-        Number.isFinite(postPct) ? postPct : Number.isFinite(prePct) ? prePct : null;
-      row.extendedPct = Number.isFinite(extendedPct) ? extendedPct / 100 : null;
+      const candidate = pickExtendedCandidate(quote);
+      const validation = validateExtendedCandidate(quote, candidate);
+      if (!candidate) {
+        row.extendedReason = validation.reason;
+        return;
+      }
+      if (!validation.valid) {
+        row.extendedReason = validation.reason;
+        return;
+      }
+      row.extendedAvailable = true;
+      row.extendedSession = candidate.session;
+      row.extendedQuoteTimeMs = candidate.timeMs;
+      row.afterHoursPrice = candidate.price;
+      row.extendedPct = Number.isFinite(candidate.pct) ? candidate.pct : null;
+      row.extendedReason = "";
+      updatedAny = true;
     });
   }
 
@@ -1893,16 +2035,22 @@ function renderTable(rows) {
       if (row.hasExtendedPrice && Number.isFinite(row.extendedDiffPct)) {
         const diffClass =
           row.extendedDiffPct > 0 ? "pos" : row.extendedDiffPct < 0 ? "neg" : "";
+        const sessionLabel =
+          row.extendedSession === "post" ? "Post" : row.extendedSession === "pre" ? "Pre" : "Ext";
+        const timeLabel = row.extendedQuoteTimeMs
+          ? `${formatEtTimeShort(row.extendedQuoteTimeMs)} ET`
+          : "time n/a";
         priceDisplay = `
           <div class="price-main">${priceMain}</div>
-          <div class="price-sub ${diffClass}">Reg ${regularText} · ${formatSignedPercent(
-          row.extendedDiffPct
-        )}</div>
+          <div class="price-sub ${diffClass}">${sessionLabel} ${timeLabel} · Reg ${regularText} · ${formatSignedPercent(
+            row.extendedDiffPct
+          )}</div>
         `;
       } else {
+        const reason = row.extendedReason || "No valid extended quote";
         priceDisplay = `
           <div class="price-main">${priceMain}</div>
-          <div class="price-sub muted">Reg ${regularText} · no extended quote</div>
+          <div class="price-sub muted">Reg ${regularText} · ${reason}</div>
         `;
       }
     }
