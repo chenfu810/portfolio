@@ -10,7 +10,7 @@
       href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Space+Grotesk:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20260208-19" />
+    <link rel="stylesheet" href="styles.css?v=20260208-20" />
     <link rel="icon" href="favicon.svg" type="image/svg+xml" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   </head>
@@ -23,9 +23,12 @@
       <header class="topbar">
         <div>
           <p class="eyebrow">Portfolio Pulse</p>
-          <h1>Track your portfolio at a glance.</h1>
         </div>
         <div class="topbar-actions">
+          <div id="priceModeToggle" class="mode-toggle" role="group" aria-label="Price mode">
+            <button type="button" class="mode-pill active" data-mode="regular" aria-pressed="true">Regular</button>
+            <button type="button" class="mode-pill" data-mode="extended" aria-pressed="false">Extended Hours</button>
+          </div>
           <div id="themeToggle" class="theme-toggle" role="group" aria-label="Theme">
             <button type="button" class="theme-pill active" data-theme="nocturne" aria-pressed="true">Nocturne</button>
             <button type="button" class="theme-pill" data-theme="ocean" aria-pressed="false">Ocean</button>
@@ -295,6 +298,6 @@
       </section>
     </main>
 
-    <script src="app.js?v=20260208-25"></script>
+    <script src="app.js?v=20260208-26"></script>
   </body>
 </html>

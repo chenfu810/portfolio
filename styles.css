@@ -108,6 +108,40 @@ h1 {
   gap: 10px;
 }
 
+.mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.mode-pill {
+  border: 0;
+  border-radius: 999px;
+  padding: 7px 11px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.mode-pill:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.mode-pill.active {
+  color: #f8fbff;
+  background: linear-gradient(135deg, var(--accent-2), var(--accent));
+}
+
 .theme-toggle {
   display: inline-flex;
   align-items: center;

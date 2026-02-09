@@ -30,6 +30,7 @@ let historyChart;
 let benchmarkCurveChart;
 let liveRows = [];
 let liveUpdateScheduled = false;
+let livePriceRunId = 0;
 let holdingsSortState = { key: "dailyValue", direction: "desc" };
 let currentRows = [];
 let currentNewsItems = [];
@@ -37,12 +38,14 @@ let newsIsLoading = false;
 let dailyHistoryExpanded = false;
 let pricesLastUpdatedAt = null;
 let newsLastUpdatedAt = null;
+let priceMode = "regular";
 
 const DAILY_PL_STORAGE_KEY = "portfolio_pulse_daily_pl_v1";
 const DAILY_PL_HISTORY_LIMIT = 400;
 const DAILY_CALENDAR_START_ISO = "2026-02-01";
 const THEME_STORAGE_KEY = "portfolio_pulse_theme_v1";
 const THEME_OPTIONS = ["nocturne", "ocean", "ember"];
+const PRICE_MODE_STORAGE_KEY = "portfolio_pulse_price_mode_v1";
 const PORTFOLIO_HISTORY_STORAGE_KEY = "portfolio_pulse_portfolio_history_v1";
 const PORTFOLIO_HISTORY_LIMIT = 520;
 const BENCHMARK_SYMBOLS = ["SPY", "QQQ"];
@@ -146,6 +149,39 @@ function initTheme() {
   setTheme(saved);
 }
 
+function normalizePriceMode(mode) {
+  const candidate = (mode || "").toString().trim().toLowerCase();
+  return candidate === "extended" ? "extended" : "regular";
+}
+
+function setPriceMode(mode, shouldRender = true) {
+  priceMode = normalizePriceMode(mode);
+  document.querySelectorAll("#priceModeToggle .mode-pill").forEach((button) => {
+    const isActive = button.dataset.mode === priceMode;
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-pressed", isActive ? "true" : "false");
+  });
+  try {
+    localStorage.setItem(PRICE_MODE_STORAGE_KEY, priceMode);
+  } catch (err) {
+    // Ignore storage failures.
+  }
+  renderDataFreshness();
+  if (shouldRender) {
+    scheduleLiveRender();
+  }
+}
+
+function initPriceMode() {
+  let saved = "regular";
+  try {
+    saved = localStorage.getItem(PRICE_MODE_STORAGE_KEY) || "regular";
+  } catch (err) {
+    saved = "regular";
+  }
+  setPriceMode(saved, false);
+}
+
 function normalizeRow(row) {
   const normalized = {};
   Object.entries(row).forEach(([key, value]) => {
@@ -157,6 +193,17 @@ function normalizeRow(row) {
   const tickerUpper = ticker.toString().trim().toUpperCase();
   const shares = Number(normalized["shares"] || 0);
   const price = Number(normalized["price (current)"] || normalized["price"] || 0);
+  const afterHoursRaw =
+    normalized["after hours price"] ||
+    normalized["after-hour price"] ||
+    normalized["afterhours price"] ||
+    normalized["extended hours price"] ||
+    normalized["post market price"] ||
+    normalized["after market price"] ||
+    "";
+  const afterHoursNum = Number(afterHoursRaw);
+  const afterHoursPrice =
+    Number.isFinite(afterHoursNum) && afterHoursNum > 0 ? afterHoursNum : null;
   const dailyPctRaw = normalized["daily change %"] || normalized["daily %"] || "0";
   const dailyPctString = dailyPctRaw.toString().trim();
   const hasPercent = dailyPctString.includes("%");
@@ -189,6 +236,9 @@ function normalizeRow(row) {
     ticker,
     shares,
     price,
+    regularPrice: price,
+    afterHoursPrice,
+    extendedPct: null,
     dailyPct,
     value,
     monthPct,
@@ -506,6 +556,53 @@ function getPortfolioExposure(rows) {
   };
 }
 
+function getRegularPrice(row) {
+  if (Number.isFinite(row.regularPrice) && row.regularPrice > 0) {
+    return row.regularPrice;
+  }
+  if (Number.isFinite(row.price) && row.price > 0) {
+    return row.price;
+  }
+  return 0;
+}
+
+function getDisplayRows(rows) {
+  return rows.map((row) => {
+    const regularPrice = getRegularPrice(row);
+    const hasExtended =
+      Number.isFinite(row.afterHoursPrice) && Number(row.afterHoursPrice) > 0;
+    const useExtended = priceMode === "extended" && hasExtended;
+    const displayPrice = useExtended ? Number(row.afterHoursPrice) : regularPrice;
+    let displayDailyPct = Number.isFinite(row.dailyPct) ? row.dailyPct : 0;
+    if (useExtended) {
+      if (Number.isFinite(row.extendedPct)) {
+        displayDailyPct = row.extendedPct;
+      } else if (regularPrice > 0) {
+        displayDailyPct = displayPrice / regularPrice - 1;
+      }
+    }
+    return {
+      ...row,
+      price: displayPrice,
+      value: row.shares * displayPrice,
+      dailyPct: displayDailyPct,
+      regularPrice,
+    };
+  });
+}
+
+function getRegularRows(rows) {
+  return rows.map((row) => {
+    const regularPrice = getRegularPrice(row);
+    return {
+      ...row,
+      price: regularPrice,
+      value: row.shares * regularPrice,
+      regularPrice,
+    };
+  });
+}
+
 function setDailyHistoryExpanded(expanded) {
   dailyHistoryExpanded = Boolean(expanded);
   const toggleBtn = document.getElementById("dailyHistoryToggle");
@@ -581,7 +678,8 @@ function setStatusPill(id, label, updatedAt, freshMinutes, delayedMinutes) {
 }
 
 function renderDataFreshness() {
-  setStatusPill("statusPrices", "Prices", pricesLastUpdatedAt, 10, 60);
+  const priceLabel = priceMode === "extended" ? "Prices (extended)" : "Prices (regular)";
+  setStatusPill("statusPrices", priceLabel, pricesLastUpdatedAt, 10, 60);
   setStatusPill("statusBenchmarks", "Benchmarks", benchmarkLastUpdatedAt, 120, 720);
   setStatusPill("statusNews", "News", newsLastUpdatedAt, 45, 240);
 }
@@ -703,6 +801,104 @@ function classifyNewsFocus(item) {
 
 function buildRssProxyUrl(feedUrl) {
   return `https://api.allorigins.win/raw?url=${encodeURIComponent(feedUrl)}`;
+}
+
+async function fetchJsonWithProxyFallback(url) {
+  try {
+    const direct = await fetch(url);
+    if (direct.ok) {
+      return await direct.json();
+    }
+  } catch (err) {
+    // Fall back to proxy below.
+  }
+  try {
+    const proxied = await fetch(buildRssProxyUrl(url));
+    if (!proxied.ok) {
+      return null;
+    }
+    const text = await proxied.text();
+    return JSON.parse(text);
+  } catch (err) {
+    return null;
+  }
+}
+
+function chunkSymbols(symbols, chunkSize = 40) {
+  const chunks = [];
+  for (let i = 0; i < symbols.length; i += chunkSize) {
+    chunks.push(symbols.slice(i, i + chunkSize));
+  }
+  return chunks;
+}
+
+async function fetchExtendedHoursQuotes(rows) {
+  const symbols = rows
+    .map((row) => (row.ticker || "").toString().trim().toUpperCase())
+    .filter((symbol) => symbol && symbol !== "CASH");
+  if (!symbols.length) {
+    return false;
+  }
+
+  let updatedAny = false;
+  const chunks = chunkSymbols(symbols, 40);
+  for (const chunk of chunks) {
+    const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(
+      chunk.join(",")
+    )}`;
+    const data = await fetchJsonWithProxyFallback(url);
+    const results = data?.quoteResponse?.result;
+    if (!Array.isArray(results)) {
+      continue;
+    }
+    results.forEach((quote) => {
+      const symbol = (quote?.symbol || "").toString().trim().toUpperCase();
+      if (!symbol) {
+        return;
+      }
+      const row = rows.find((item) => (item.ticker || "").toString().trim().toUpperCase() === symbol);
+      if (!row) {
+        return;
+      }
+
+      const regularPrice = Number(quote.regularMarketPrice);
+      if (Number.isFinite(regularPrice) && regularPrice > 0) {
+        row.regularPrice = regularPrice;
+        row.price = regularPrice;
+        updatedAny = true;
+      }
+
+      const postPrice = Number(quote.postMarketPrice);
+      const prePrice = Number(quote.preMarketPrice);
+      const extendedPrice =
+        Number.isFinite(postPrice) && postPrice > 0
+          ? postPrice
+          : Number.isFinite(prePrice) && prePrice > 0
+            ? prePrice
+            : null;
+      if (Number.isFinite(extendedPrice) && extendedPrice > 0) {
+        row.afterHoursPrice = extendedPrice;
+        updatedAny = true;
+      }
+
+      const regularPct = Number(quote.regularMarketChangePercent);
+      if (Number.isFinite(regularPct)) {
+        row.dailyPct = regularPct / 100;
+      }
+
+      const postPct = Number(quote.postMarketChangePercent);
+      const prePct = Number(quote.preMarketChangePercent);
+      const extendedPct =
+        Number.isFinite(postPct) ? postPct : Number.isFinite(prePct) ? prePct : null;
+      row.extendedPct = Number.isFinite(extendedPct) ? extendedPct / 100 : null;
+    });
+  }
+
+  if (updatedAny) {
+    pricesLastUpdatedAt = new Date();
+    scheduleLiveRender();
+  }
+  return updatedAny;
 }
 
 async function fetchBenchmarkSeries(symbol) {
@@ -1135,7 +1331,7 @@ async function loadNewsDigest() {
     selectedSource,
     selectedFocus,
   });
-  renderExpertAdvice(currentRows, currentNewsItems);
+  renderExpertAdvice(getDisplayRows(currentRows), currentNewsItems);
   newsIsLoading = false;
   renderDataFreshness();
 }
@@ -1769,25 +1965,17 @@ function scheduleLiveRender() {
   requestAnimationFrame(() => {
     liveUpdateScheduled = false;
     currentRows = liveRows;
-    renderSummary(liveRows);
-    renderDailyGainLoss(liveRows);
-    renderTable(liveRows);
-    renderTreemap(liveRows);
-    renderExposureBreakdown(liveRows);
+    const displayRows = getDisplayRows(liveRows);
+    const regularRows = getRegularRows(liveRows);
+    renderSummary(displayRows, regularRows);
+    renderDailyGainLoss(displayRows);
+    renderTable(displayRows);
+    renderTreemap(displayRows);
+    renderExposureBreakdown(displayRows);
     renderBenchmarkContext();
-    renderExpertAdvice(liveRows, currentNewsItems);
+    renderExpertAdvice(displayRows, currentNewsItems);
     renderDataFreshness();
   });
-}
-
-function applyLivePrice(ticker, price) {
-  const row = liveRows.find((item) => item.ticker === ticker);
-  if (!row) {
-    return;
-  }
-  row.price = price;
-  row.value = row.shares * price;
-  scheduleLiveRender();
 }
 
 async function fetchLivePricesFmp(rows) {
@@ -1832,13 +2020,15 @@ async function fetchLivePricesFmp(rows) {
         if (row) {
           row.dailyPct = Number.isFinite(pct) ? pct : row.dailyPct;
           updated = true;
+          row.regularPrice = Number(item.price);
+          row.price = Number(item.price);
+          row.value = row.shares * row.price;
         }
-        applyLivePrice(item.symbol, Number(item.price));
       }
     });
     if (updated) {
       pricesLastUpdatedAt = new Date();
-      renderDataFreshness();
+      scheduleLiveRender();
     }
     return { ok: true, rateLimited: false };
   } catch (err) {
@@ -1846,12 +2036,28 @@ async function fetchLivePricesFmp(rows) {
   }
 }
 
+async function refreshLivePrices(rows) {
+  const gotExtended = await fetchExtendedHoursQuotes(rows);
+  if (gotExtended) {
+    return { ok: true, rateLimited: false };
+  }
+  return fetchLivePricesFmp(rows);
+}
+
 function startLivePrices(rows) {
   liveRows = rows;
+  livePriceRunId += 1;
+  const runId = livePriceRunId;
   let backoff = LIVE_PRICE_REFRESH_MS;
 
   const tick = async () => {
-    const result = await fetchLivePricesFmp(rows);
+    if (runId !== livePriceRunId) {
+      return;
+    }
+    const result = await refreshLivePrices(rows);
+    if (runId !== livePriceRunId) {
+      return;
+    }
     if (result.rateLimited) {
       backoff = Math.min(backoff * 2, LIVE_PRICE_MAX_BACKOFF_MS);
     } else {
@@ -2022,17 +2228,18 @@ function renderDailyGainLoss(rows) {
   });
 }
 
-function renderSummary(rows) {
-  const totalValue = rows.reduce((sum, row) => sum + row.value, 0);
-  const dailyChangeValue = rows.reduce(
+function renderSummary(displayRows, snapshotRows = displayRows) {
+  const totalValue = displayRows.reduce((sum, row) => sum + row.value, 0);
+  const dailyChangeValue = displayRows.reduce(
     (sum, row) => sum + row.value * row.dailyPct,
     0
   );
   const dailyChangePct = totalValue ? dailyChangeValue / totalValue : 0;
-  const snapshots = upsertTodayPortfolioSnapshot(rows, totalValue);
+  const snapshotTotal = snapshotRows.reduce((sum, row) => sum + row.value, 0);
+  const snapshots = upsertTodayPortfolioSnapshot(snapshotRows, snapshotTotal);
   const performanceSeries = buildPortfolioPerformanceSeries(snapshots);
   latestPortfolioReturns = computePortfolioReturnsFromSeries(performanceSeries, dailyChangePct);
-  const exposure = getPortfolioExposure(rows);
+  const exposure = getPortfolioExposure(displayRows);
 
   document.getElementById("totalValue").textContent = fmtCurrency.format(totalValue);
   document.getElementById("dailyChange").textContent = `${formatSignedPercent(
@@ -2094,17 +2301,17 @@ async function loadData() {
   currentRows = rows;
   const hasSheetPrices = rows.some((row) => row.price > 0);
   pricesLastUpdatedAt = hasSheetPrices ? new Date() : null;
-  renderSummary(rows);
-  renderDailyGainLoss(rows);
-  renderTable(rows);
-  renderTreemap(rows);
-  renderExposureBreakdown(rows);
+  const displayRows = getDisplayRows(rows);
+  const regularRows = getRegularRows(rows);
+  renderSummary(displayRows, regularRows);
+  renderDailyGainLoss(displayRows);
+  renderTable(displayRows);
+  renderTreemap(displayRows);
+  renderExposureBreakdown(displayRows);
   renderBenchmarkContext();
-  renderExpertAdvice(rows, currentNewsItems);
+  renderExpertAdvice(displayRows, currentNewsItems);
   renderDataFreshness();
-  if (!hasSheetPrices) {
-    startLivePrices(rows);
-  }
+  startLivePrices(rows);
 
   document.getElementById("sourceLabel").textContent = sourceLabel;
 
@@ -2144,6 +2351,14 @@ document.getElementById("themeToggle").addEventListener("click", (event) => {
   setTheme(button.dataset.theme);
 });
 
+document.getElementById("priceModeToggle").addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-mode]");
+  if (!button) {
+    return;
+  }
+  setPriceMode(button.dataset.mode);
+});
+
 document.getElementById("holdingsHead").addEventListener("click", (event) => {
   const button = event.target.closest("button[data-sort-key]");
   if (!button) {
@@ -2155,7 +2370,7 @@ document.getElementById("holdingsHead").addEventListener("click", (event) => {
   } else {
     holdingsSortState = { key: nextKey, direction: "desc" };
   }
-  renderTable(currentRows);
+  renderTable(getDisplayRows(currentRows));
 });
 
 document.getElementById("newsRefresh").addEventListener("click", () => {
@@ -2171,15 +2386,15 @@ document.getElementById("newsFocus").addEventListener("change", () => {
 });
 
 document.getElementById("adviceRefresh").addEventListener("click", () => {
-  renderExpertAdvice(currentRows, currentNewsItems);
+  renderExpertAdvice(getDisplayRows(currentRows), currentNewsItems);
 });
 
 document.getElementById("adviceSource").addEventListener("change", () => {
-  renderExpertAdvice(currentRows, currentNewsItems);
+  renderExpertAdvice(getDisplayRows(currentRows), currentNewsItems);
 });
 
 document.getElementById("adviceMode").addEventListener("change", () => {
-  renderExpertAdvice(currentRows, currentNewsItems);
+  renderExpertAdvice(getDisplayRows(currentRows), currentNewsItems);
 });
 
 document.getElementById("copyAdvicePrompt").addEventListener("click", async () => {
@@ -2201,6 +2416,7 @@ document.getElementById("dailyHistoryToggle").addEventListener("click", () => {
 
 setDailyHistoryExpanded(false);
 initTheme();
+initPriceMode();
 renderDataFreshness();
 setInterval(renderDataFreshness, 60_000);
 
